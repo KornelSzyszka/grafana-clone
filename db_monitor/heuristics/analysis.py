@@ -1,0 +1,253 @@
+from dataclasses import dataclass
+
+from django.db import transaction
+
+from db_monitor.models import AnalysisFinding, StatsSnapshot
+
+DEFAULT_THRESHOLDS = {
+    "slow_query_mean_ms": 150.0,
+    "slow_query_max_ms": 500.0,
+    "hot_query_total_ms": 5000.0,
+    "hot_query_calls": 200,
+    "unused_index_idx_scan_max": 5,
+    "unused_index_size_min_bytes": 1024 * 1024,
+    "seq_scan_table_min": 100,
+    "seq_scan_live_rows_min": 1000,
+    "seq_scan_ratio_min": 3.0,
+}
+
+
+@dataclass(frozen=True)
+class FindingCandidate:
+    type: str
+    severity: str
+    title: str
+    description: str
+    object_type: str
+    object_name: str
+    evidence_json: dict
+
+
+def _truncate_query(query_text, limit=180):
+    if len(query_text) <= limit:
+        return query_text
+    return f"{query_text[: limit - 3]}..."
+
+
+def _severity_for_slow_query(mean_ms, max_ms):
+    if mean_ms >= 500 or max_ms >= 1500:
+        return "high"
+    if mean_ms >= 250 or max_ms >= 1000:
+        return "medium"
+    return "low"
+
+
+def _severity_for_hot_query(total_ms, calls):
+    if total_ms >= 20000 or calls >= 2000:
+        return "high"
+    if total_ms >= 10000 or calls >= 800:
+        return "medium"
+    return "low"
+
+
+def _severity_for_unused_index(index_size_bytes):
+    if index_size_bytes >= 50 * 1024 * 1024:
+        return "high"
+    if index_size_bytes >= 10 * 1024 * 1024:
+        return "medium"
+    return "low"
+
+
+def _severity_for_seq_scan(seq_scan, n_live_tup, ratio):
+    if seq_scan >= 1000 or n_live_tup >= 100000 or ratio >= 10:
+        return "high"
+    if seq_scan >= 300 or n_live_tup >= 20000 or ratio >= 5:
+        return "medium"
+    return "low"
+
+
+def _slow_query_candidates(snapshot, thresholds):
+    candidates = []
+    for query_stat in snapshot.query_stats.all():
+        if query_stat.mean_exec_time <= thresholds["slow_query_mean_ms"] and query_stat.max_exec_time <= thresholds["slow_query_max_ms"]:
+            continue
+        preview = _truncate_query(query_stat.query_text_normalized.replace("\n", " "))
+        candidates.append(
+            FindingCandidate(
+                type="slow_query",
+                severity=_severity_for_slow_query(query_stat.mean_exec_time, query_stat.max_exec_time),
+                title=f"Slow query detected ({query_stat.queryid or 'no-queryid'})",
+                description=(
+                    "The query exceeds the configured execution-time threshold and should be reviewed for indexes, "
+                    "join strategy, or application-side batching."
+                ),
+                object_type="query",
+                object_name=query_stat.queryid or preview,
+                evidence_json={
+                    "queryid": query_stat.queryid,
+                    "query_preview": preview,
+                    "calls": query_stat.calls,
+                    "mean_exec_time": query_stat.mean_exec_time,
+                    "max_exec_time": query_stat.max_exec_time,
+                    "thresholds": {
+                        "mean_ms": thresholds["slow_query_mean_ms"],
+                        "max_ms": thresholds["slow_query_max_ms"],
+                    },
+                },
+            )
+        )
+    return candidates
+
+
+def _hot_query_candidates(snapshot, thresholds):
+    candidates = []
+    for query_stat in snapshot.query_stats.all():
+        if query_stat.total_exec_time < thresholds["hot_query_total_ms"] and query_stat.calls < thresholds["hot_query_calls"]:
+            continue
+        preview = _truncate_query(query_stat.query_text_normalized.replace("\n", " "))
+        candidates.append(
+            FindingCandidate(
+                type="hot_query",
+                severity=_severity_for_hot_query(query_stat.total_exec_time, query_stat.calls),
+                title=f"High-cost hot query ({query_stat.queryid or 'no-queryid'})",
+                description=(
+                    "The query contributes a large cumulative execution cost. Even if single runs are acceptable, "
+                    "its frequency makes it a likely optimization target."
+                ),
+                object_type="query",
+                object_name=query_stat.queryid or preview,
+                evidence_json={
+                    "queryid": query_stat.queryid,
+                    "query_preview": preview,
+                    "calls": query_stat.calls,
+                    "total_exec_time": query_stat.total_exec_time,
+                    "mean_exec_time": query_stat.mean_exec_time,
+                    "thresholds": {
+                        "total_ms": thresholds["hot_query_total_ms"],
+                        "calls": thresholds["hot_query_calls"],
+                    },
+                },
+            )
+        )
+    return candidates
+
+
+def _unused_index_candidates(snapshot, thresholds):
+    candidates = []
+    for index_stat in snapshot.index_stats.all():
+        if index_stat.idx_scan > thresholds["unused_index_idx_scan_max"]:
+            continue
+        if index_stat.index_size_bytes < thresholds["unused_index_size_min_bytes"]:
+            continue
+        candidates.append(
+            FindingCandidate(
+                type="unused_index",
+                severity=_severity_for_unused_index(index_stat.index_size_bytes),
+                title=f"Candidate unused index `{index_stat.index_name}`",
+                description=(
+                    "The index has very low scan count relative to its size, so it may be unused or not worth its "
+                    "maintenance cost."
+                ),
+                object_type="index",
+                object_name=f"{index_stat.schema_name}.{index_stat.index_name}",
+                evidence_json={
+                    "schema_name": index_stat.schema_name,
+                    "table_name": index_stat.table_name,
+                    "index_name": index_stat.index_name,
+                    "idx_scan": index_stat.idx_scan,
+                    "index_size_bytes": index_stat.index_size_bytes,
+                    "thresholds": {
+                        "idx_scan_max": thresholds["unused_index_idx_scan_max"],
+                        "size_min_bytes": thresholds["unused_index_size_min_bytes"],
+                    },
+                },
+            )
+        )
+    return candidates
+
+
+def _seq_scan_candidates(snapshot, thresholds):
+    candidates = []
+    for table_stat in snapshot.table_stats.all():
+        if table_stat.seq_scan < thresholds["seq_scan_table_min"]:
+            continue
+        if table_stat.n_live_tup < thresholds["seq_scan_live_rows_min"]:
+            continue
+        ratio = table_stat.seq_scan / max(table_stat.idx_scan, 1)
+        if ratio < thresholds["seq_scan_ratio_min"]:
+            continue
+        candidates.append(
+            FindingCandidate(
+                type="seq_scan_heavy_table",
+                severity=_severity_for_seq_scan(table_stat.seq_scan, table_stat.n_live_tup, ratio),
+                title=f"Seq-scan-heavy table `{table_stat.table_name}`",
+                description=(
+                    "The table shows heavy sequential scans compared with index scans, which may indicate missing "
+                    "indexes or inefficient filter patterns."
+                ),
+                object_type="table",
+                object_name=f"{table_stat.schema_name}.{table_stat.table_name}",
+                evidence_json={
+                    "schema_name": table_stat.schema_name,
+                    "table_name": table_stat.table_name,
+                    "seq_scan": table_stat.seq_scan,
+                    "idx_scan": table_stat.idx_scan,
+                    "n_live_tup": table_stat.n_live_tup,
+                    "n_dead_tup": table_stat.n_dead_tup,
+                    "seq_to_idx_ratio": ratio,
+                    "thresholds": {
+                        "seq_scan_min": thresholds["seq_scan_table_min"],
+                        "live_rows_min": thresholds["seq_scan_live_rows_min"],
+                        "ratio_min": thresholds["seq_scan_ratio_min"],
+                    },
+                },
+            )
+        )
+    return candidates
+
+
+def _build_candidates(snapshot, thresholds):
+    candidates = []
+    candidates.extend(_slow_query_candidates(snapshot, thresholds))
+    candidates.extend(_hot_query_candidates(snapshot, thresholds))
+    candidates.extend(_unused_index_candidates(snapshot, thresholds))
+    candidates.extend(_seq_scan_candidates(snapshot, thresholds))
+    return candidates
+
+
+@transaction.atomic
+def analyze_snapshot(snapshot, thresholds=None, replace_existing=True):
+    if isinstance(snapshot, int):
+        snapshot = StatsSnapshot.objects.get(id=snapshot)
+
+    thresholds = {**DEFAULT_THRESHOLDS, **(thresholds or {})}
+
+    if replace_existing:
+        snapshot.findings.all().delete()
+
+    candidates = _build_candidates(snapshot, thresholds)
+    AnalysisFinding.objects.bulk_create(
+        [
+            AnalysisFinding(
+                snapshot=snapshot,
+                type=candidate.type,
+                severity=candidate.severity,
+                title=candidate.title,
+                description=candidate.description,
+                object_type=candidate.object_type,
+                object_name=candidate.object_name,
+                evidence_json=candidate.evidence_json,
+            )
+            for candidate in candidates
+        ],
+        batch_size=500,
+    )
+
+    summary = {
+        "created": len(candidates),
+        "by_type": {},
+        "thresholds": thresholds,
+    }
+    for candidate in candidates:
+        summary["by_type"][candidate.type] = summary["by_type"].get(candidate.type, 0) + 1
+    return snapshot, summary
