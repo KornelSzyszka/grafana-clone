@@ -1,0 +1,60 @@
+{% extends "shop/base.html" %}
+
+{% block title %}Users{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Dodatkowe, specyficzne style dla tej tabeli */
+    .user-id {
+        color: var(--text-light);
+        font-family: monospace;
+        font-size: 12px;
+    }
+    
+    .user-email {
+        color: var(--text-light);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <div class="page-header">
+        <h1>Users</h1>
+        <p>List of users in the system ({{ users|length }})</p>
+    </div>
+
+    <div class="content-card">
+        <div class="table-wrapper">
+            <table class="main-table">
+                <thead>
+                    <tr>
+                        <th style="width: 80px;">ID</th>
+                        <th>Username</th>
+                        <th>Email</th>
+                        <th style="text-align: right;">User page</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users %}
+                    <tr>
+                        <td class="user-id">#{{ user.id }}</td>
+                        <td><strong>{{ user.username }}</strong></td>
+                        <td class="user-email">{{ user.email }}</td>
+                        <td style="text-align: right;">
+                            <a href="/api/users/{{ user.id }}/orders/" class="btn-action">Page</a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="4" style="text-align: center; padding: 40px; color: var(--text-light);">
+                            No users to show.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

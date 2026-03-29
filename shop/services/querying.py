@@ -106,6 +106,23 @@ def get_product_detail(slug):
     }
 
 
+def get_users():
+    users = get_user_model().objects.all().order_by("id")
+    if not users:
+        return None
+    
+    return {
+        "users": [
+            {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+            }
+            for user in users
+        ]
+    }
+
+
 def get_order_history(user_id, limit=10):
     user = get_user_model().objects.filter(id=user_id).first()
     if not user:

@@ -1,0 +1,124 @@
+{% extends "shop/base.html" %}
+
+{% block title %}Products{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Kolumna ceny */
+    .price-tag {
+        font-weight: 700;
+        color: var(--text-dark);
+        font-size: 15px;
+    }
+
+    /* Badge stanu magazynowego */
+    .stock-badge {
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+    .stock-ok { background: #e3fcef; color: #01896e; }
+    .stock-low { background: #fff5f5; color: #ff7675; }
+
+    /* Pasek popularności - UNIKALNE DLA PRODUKTÓW */
+    .pop-container {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 120px;
+    }
+
+    .pop-bar-bg {
+        flex-grow: 1;
+        height: 8px;
+        background: #eee;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    .pop-bar-fill {
+        height: 100%;
+        background: #fdcb6e; /* Złoty kolor popularności */
+        border-radius: 4px;
+    }
+
+    .pop-value {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--text-light);
+        min-width: 30px;
+    }
+
+    .category-tag {
+        font-size: 11px;
+        background: var(--border-color);
+        padding: 2px 8px;
+        border-radius: 4px;
+        color: var(--text-light);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <div class="page-header">
+        <h1>Products</h1>
+        <p>List of products in the system ({{ count }})</p>
+    </div>
+
+    <div class="content-card">
+        <div class="table-wrapper">
+            <table class="main-table">
+                <thead>
+                    <tr>
+                        <th>Product name</th>
+                        <th>Category</th>
+                        <th>Price</th>
+                        <th>Stock</th>
+                        <th>Popularity</th>
+                        <th style="text-align: right;">Product Page</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td>
+                            <div style="font-weight: 600;">{{ item.name }}</div>
+                            <div style="font-size: 11px; color: var(--text-light);">slug: {{ item.slug }}</div>
+                        </td>
+                        <td><span class="category-tag">{{ item.category }}</span></td>
+                        <td class="price-tag">{{ item.price }} <small>PLN</small></td>
+                        <td>
+                            {% if item.stock > 10 %}
+                                <span class="stock-badge stock-ok">Available ({{ item.stock }})</span>
+                            {% else %}
+                                <span class="stock-badge stock-low">Low stock ({{ item.stock }})</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="pop-container">
+                                <div class="pop-bar-bg">
+                                    <div class="pop-bar-fill" style="width: {{ item.popularity_score }}%;"></div>
+                                </div>
+                                <span class="pop-value">{{ item.popularity_score }}%</span>
+                            </div>
+                        </td>
+                        <td style="text-align: right;">
+                            <a href="/api/products/{{ item.slug }}/" class="btn-action">Page</a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" style="text-align: center; padding: 40px; color: var(--text-light);">
+                            Did not find any products.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

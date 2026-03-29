@@ -1,0 +1,109 @@
+{% extends "shop/base.html" %}
+
+{% block title %}Main Page{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Specyficzne style tylko dla menu na stronie głównej */
+    .nav-card {
+        max-width: 600px;
+        margin: 0 auto; /* Centrowanie karty na środku */
+    }
+
+    .nav-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .nav-item {
+        border-bottom: 1px solid var(--border-color);
+        transition: background 0.2s ease;
+    }
+
+    .nav-item:last-child {
+        border-bottom: none;
+    }
+
+    .nav-link {
+        display: flex;
+        align-items: center;
+        padding: 25px 30px;
+        text-decoration: none;
+        color: var(--text-dark);
+    }
+
+    .nav-link:hover {
+        background: var(--hover-color);
+    }
+
+    .nav-info {
+        flex: 1; /* Pcha strzałkę do prawej krawędzi */
+    }
+
+    .nav-label {
+        display: block;
+        font-weight: 600;
+        font-size: 16px;
+        margin-bottom: 4px;
+    }
+
+    .nav-desc {
+        display: block;
+        font-size: 13px;
+        color: var(--text-light);
+    }
+
+    .nav-arrow {
+        font-size: 20px;
+        color: var(--primary-color);
+        font-weight: bold;
+        transition: transform 0.2s ease;
+    }
+
+    .nav-link:hover .nav-arrow {
+        transform: translateX(8px);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <div class="page-header" style="text-align: center;">
+        <h1>Welcome to {{ service }}</h1>
+        <p>Choose where you want to go</p>
+    </div>
+
+    <div class="content-card nav-card">
+        <ul class="nav-list">
+            <li class="nav-item">
+                <a href="/api/users/" class="nav-link">
+                    <div class="nav-info">
+                        <span class="nav-label">Users</span>
+                        <span class="nav-desc">A list of users</span>
+                    </div>
+                    <span class="nav-arrow">→</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="/api/products/" class="nav-link">
+                    <div class="nav-info">
+                        <span class="nav-label">Products</span>
+                        <span class="nav-desc">A list of products</span>
+                    </div>
+                    <span class="nav-arrow">→</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="/api/reports/sales/" class="nav-link">
+                    <div class="nav-info">
+                        <span class="nav-label">Sales Report</span>
+                        <span class="nav-desc">Report of sales in a given category</span>
+                    </div>
+                    <span class="nav-arrow">→</span>
+                </a>
+            </li>
+        </ul>
+    </div>
+</div>
+{% endblock %}
