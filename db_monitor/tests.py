@@ -1,9 +1,11 @@
 from django.core.management import call_command
 from django.test import TestCase
+from django.urls import reverse
 
 from db_monitor.collectors import collect_stats_snapshot
 from db_monitor.heuristics import analyze_snapshot
 from db_monitor.services.comparison import compare_snapshots
+from db_monitor.services.reporting import get_dashboard_overview, get_snapshot_report
 from db_monitor.models import AnalysisFinding, IndexStatSnapshot, QueryStatSnapshot, StatsSnapshot, TableStatSnapshot
 
 
@@ -280,3 +282,148 @@ class Buffer:
 
     def write(self, message):
         self.output.append(message)
+
+
+class ReportingDashboardTests(TestCase):
+    def setUp(self):
+        self.before = StatsSnapshot.objects.create(
+            label="before",
+            environment="baseline",
+            database_vendor="postgresql",
+            database_name="grafana_clone",
+            status=StatsSnapshot.Status.COMPLETED,
+            metadata_json={"counts": {"query_stats": 2, "table_stats": 1, "index_stats": 1, "activities": 0}},
+        )
+        self.after = StatsSnapshot.objects.create(
+            label="after",
+            environment="optimized",
+            database_vendor="postgresql",
+            database_name="grafana_clone",
+            status=StatsSnapshot.Status.DEGRADED,
+            metadata_json={"counts": {"query_stats": 2, "table_stats": 1, "index_stats": 1, "activities": 1}},
+        )
+
+        QueryStatSnapshot.objects.bulk_create(
+            [
+                QueryStatSnapshot(
+                    snapshot=self.before,
+                    queryid="before-query",
+                    query_text_normalized="SELECT * FROM shop_order WHERE user_id = $1",
+                    calls=100,
+                    total_exec_time=8000,
+                    mean_exec_time=80,
+                    min_exec_time=10,
+                    max_exec_time=200,
+                    rows=900,
+                ),
+                QueryStatSnapshot(
+                    snapshot=self.after,
+                    queryid="after-query",
+                    query_text_normalized="SELECT * FROM shop_product WHERE name ILIKE $1",
+                    calls=200,
+                    total_exec_time=15000,
+                    mean_exec_time=75,
+                    min_exec_time=15,
+                    max_exec_time=220,
+                    rows=1300,
+                ),
+            ]
+        )
+        TableStatSnapshot.objects.create(
+            snapshot=self.after,
+            schema_name="public",
+            table_name="shop_product",
+            seq_scan=350,
+            idx_scan=40,
+            n_live_tup=40000,
+            n_dead_tup=500,
+            vacuum_count=0,
+            autovacuum_count=1,
+            analyze_count=0,
+            autoanalyze_count=1,
+        )
+        TableStatSnapshot.objects.create(
+            snapshot=self.before,
+            schema_name="public",
+            table_name="shop_product",
+            seq_scan=150,
+            idx_scan=70,
+            n_live_tup=38000,
+            n_dead_tup=800,
+            vacuum_count=0,
+            autovacuum_count=1,
+            analyze_count=0,
+            autoanalyze_count=1,
+        )
+        IndexStatSnapshot.objects.create(
+            snapshot=self.after,
+            schema_name="public",
+            table_name="shop_product",
+            index_name="shop_product_stock_idx",
+            idx_scan=1,
+            index_size_bytes=8 * 1024 * 1024,
+        )
+        IndexStatSnapshot.objects.create(
+            snapshot=self.before,
+            schema_name="public",
+            table_name="shop_product",
+            index_name="shop_product_stock_idx",
+            idx_scan=4,
+            index_size_bytes=8 * 1024 * 1024,
+        )
+        AnalysisFinding.objects.create(
+            snapshot=self.after,
+            type="slow_query",
+            severity="high",
+            title="Slow product search",
+            description="Product search remains expensive.",
+            object_type="query",
+            object_name="after-query",
+            evidence_json={"calls": 200},
+        )
+        AnalysisFinding.objects.create(
+            snapshot=self.after,
+            type="seq_scan_heavy_table",
+            severity="medium",
+            title="Product table scan pressure",
+            description="Table scans dominate product access.",
+            object_type="table",
+            object_name="public.shop_product",
+            evidence_json={"seq_scan": 350},
+        )
+
+    def test_dashboard_service_surfaces_latest_snapshot_and_comparison(self):
+        overview = get_dashboard_overview(limit=5)
+
+        self.assertEqual(overview["latest_snapshot"]["snapshot"].id, self.after.id)
+        self.assertEqual(overview["latest_snapshot"]["counts"]["findings"], 2)
+        self.assertEqual(overview["comparison"]["summary"]["snapshot_b"]["id"], self.after.id)
+
+    def test_snapshot_report_includes_rankings_and_findings(self):
+        report = get_snapshot_report(self.after.id, ranking_limit=5)
+
+        self.assertEqual(report["snapshot"].id, self.after.id)
+        self.assertEqual(report["queries"]["slowest"][0]["queryid"], "after-query")
+        self.assertEqual(report["tables"]["problematic"][0]["table"], "public.shop_product")
+        self.assertEqual(report["findings"]["top"][0]["type"], "slow_query")
+
+    def test_overview_page_renders_dashboard(self):
+        response = self.client.get(reverse("db_monitor:overview"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Monitoring dashboard")
+        self.assertContains(response, "Slow product search")
+
+    def test_snapshot_section_views_render_expected_content(self):
+        response = self.client.get(reverse("db_monitor:snapshot-section", args=[self.after.id, "findings"]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "seq_scan_heavy_table")
+        self.assertContains(response, "public.shop_product")
+
+    def test_compare_view_renders_before_after_summary(self):
+        response = self.client.get(reverse("db_monitor:compare"), {"snapshot_a": self.before.id, "snapshot_b": self.after.id})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Snapshot comparison")
+        self.assertContains(response, "Top query regressions")

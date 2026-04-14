@@ -8,15 +8,14 @@ from shop.services import get_order_history, get_product_detail, get_product_lis
 @require_GET
 def api_root(_request):
     context = {
-            "service": "grafana-clone-foundation",
-            "endpoints": {
-                "products": "/api/products/",
-                #"product_detail": "/api/products/<slug:slug>/",
-                "users": "/api/users/",
-                #"order_history": "/api/users/<int:user_id>/orders/",
-                "sales_report": "/api/reports/sales/",
-            },
-        }
+        "service": "grafana-clone-foundation",
+        "endpoints": {
+            "products": "/api/products/",
+            "monitoring": "/monitoring/",
+            "users": "/api/users/",
+            "sales_report": "/api/reports/sales/",
+        },
+    }
     return render(_request, "shop/root.html", context)
 
     '''

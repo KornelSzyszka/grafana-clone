@@ -1,0 +1,113 @@
+{% extends "db_monitor/base.html" %}
+
+{% block title %}Monitoring Dashboard{% endblock %}
+
+{% block content %}
+<div class="monitor-shell">
+    <div class="monitor-hero">
+        <div class="monitor-title">
+            <h1>Monitoring dashboard</h1>
+            <p>Classic Django reporting views over collected PostgreSQL snapshots, findings, rankings, and before/after comparisons.</p>
+        </div>
+        <a class="button-link" href="{% url 'db_monitor:compare' %}">Open comparison</a>
+    </div>
+
+    <div class="monitor-nav">
+        <a href="/">Application home</a>
+        <a href="{% url 'db_monitor:overview' %}">Dashboard</a>
+    </div>
+
+    {% if latest_snapshot %}
+    <div class="metrics-grid">
+        <div class="metric-card"><div class="label">Latest Snapshot</div><div class="value">#{{ latest_snapshot.snapshot.id }}</div><div class="subvalue">{{ latest_snapshot.snapshot.label|default:"No label" }}</div></div>
+        <div class="metric-card"><div class="label">Findings</div><div class="value">{{ latest_snapshot.counts.findings }}</div><div class="subvalue">{{ latest_snapshot.severity_counts|length }} severity bands active</div></div>
+        <div class="metric-card"><div class="label">Tracked Queries</div><div class="value">{{ latest_snapshot.counts.queries }}</div><div class="subvalue">{{ latest_snapshot.metrics.total_calls }} total calls</div></div>
+        <div class="metric-card"><div class="label">Tracked Tables</div><div class="value">{{ latest_snapshot.counts.tables }}</div><div class="subvalue">{{ latest_snapshot.metrics.total_seq_scans }} seq scans</div></div>
+    </div>
+
+    <div class="split-grid">
+        <section class="panel">
+            <div class="panel-header"><h2>Latest snapshot overview</h2><p>{{ latest_snapshot.snapshot.created_at }} | {{ latest_snapshot.snapshot.environment|default:"no environment" }}</p></div>
+            <div class="panel-body">
+                <div class="inline-meta">
+                    <span class="status-pill status-{{ latest_snapshot.snapshot.status }}">{{ latest_snapshot.snapshot.status }}</span>
+                    <span class="muted">{{ latest_snapshot.snapshot.database_vendor }} / {{ latest_snapshot.snapshot.database_name|default:"unknown database" }}</span>
+                    <a href="{% url 'db_monitor:snapshot-overview' latest_snapshot.snapshot.id %}">Open snapshot</a>
+                </div>
+                <ul class="summary-list" style="margin-top: 16px;">
+                    {% for finding in latest_snapshot.top_findings %}
+                    <li><strong>{{ finding.title }}</strong><br><span class="severity-pill severity-{{ finding.severity }}">{{ finding.severity }}</span> <span class="muted">{{ finding.type }}{% if finding.object_name %} | {{ finding.object_name }}{% endif %}</span></li>
+                    {% empty %}
+                    <li>No findings recorded for the latest snapshot.</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-header"><h2>Latest before/after comparison</h2><p>Uses the two newest snapshots when both exist.</p></div>
+            <div class="panel-body">
+                {% if comparison %}
+                <div class="key-value">
+                    <div><span class="label">Compared</span><strong>#{{ comparison.summary.snapshot_a.id }} to #{{ comparison.summary.snapshot_b.id }}</strong></div>
+                    <div><span class="label">Findings Delta</span><strong>{{ comparison.findings_delta }}</strong></div>
+                    <div><span class="label">Query Exec Time Delta</span><strong>{{ comparison.query_total_exec_time.delta|floatformat:2 }} ms</strong></div>
+                    <div><span class="label">Seq Scan Delta</span><strong>{{ comparison.seq_scan_total.delta }}</strong></div>
+                </div>
+                <ul class="summary-list" style="margin-top: 16px;">
+                    {% for entry in comparison.summary.queries.top_regressions %}
+                    <li><strong>{{ entry.queryid|default:entry.query_preview }}</strong><br><span class="muted">Total exec delta {{ entry.total_exec_time.delta|floatformat:2 }} ms | Mean delta {{ entry.mean_exec_time.delta|floatformat:2 }} ms</span></li>
+                    {% empty %}
+                    <li>No query regressions in the latest comparison.</li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p>No comparison is available yet. Collect at least two snapshots to unlock the before/after view.</p>
+                {% endif %}
+            </div>
+        </section>
+    </div>
+
+    <div class="split-grid" style="margin-top: 18px;">
+        <section class="panel">
+            <div class="panel-header"><h3>Top slow queries</h3></div>
+            <div class="panel-body"><ul class="summary-list">{% for query in latest_snapshot.top_slow_queries %}<li><strong>{{ query.queryid|default:query.preview }}</strong><br><span class="muted">Mean {{ query.mean_exec_time|floatformat:2 }} ms | Max {{ query.max_exec_time|floatformat:2 }} ms</span></li>{% empty %}<li>No query stats available.</li>{% endfor %}</ul></div>
+        </section>
+        <section class="panel">
+            <div class="panel-header"><h3>Hot queries</h3></div>
+            <div class="panel-body"><ul class="summary-list">{% for query in latest_snapshot.top_hot_queries %}<li><strong>{{ query.queryid|default:query.preview }}</strong><br><span class="muted">Total {{ query.total_exec_time|floatformat:2 }} ms | Calls {{ query.calls }}</span></li>{% empty %}<li>No query stats available.</li>{% endfor %}</ul></div>
+        </section>
+        <section class="panel">
+            <div class="panel-header"><h3>Problematic tables</h3></div>
+            <div class="panel-body"><ul class="summary-list">{% for table in latest_snapshot.problematic_tables %}<li><strong>{{ table.table }}</strong><br><span class="muted">Seq scans {{ table.seq_scan }} | Ratio {{ table.seq_to_idx_ratio|floatformat:2 }}</span></li>{% empty %}<li>No table stats available.</li>{% endfor %}</ul></div>
+        </section>
+    </div>
+    {% else %}
+    <section class="panel"><div class="panel-header"><h2>No snapshots yet</h2></div><div class="panel-body"><p>Run `collect_stats` and `analyze_stats` first. The dashboard will populate automatically once monitoring data exists.</p></div></section>
+    {% endif %}
+
+    <section class="panel" style="margin-top: 18px;">
+        <div class="panel-header"><h2>Recent snapshots</h2><p>Quick access to the latest report views.</p></div>
+        <div class="panel-body">
+            <table class="main-table">
+                <thead><tr><th>ID</th><th>Label</th><th>Status</th><th>Environment</th><th>Findings</th><th>Queries</th><th>Open</th></tr></thead>
+                <tbody>
+                    {% for entry in recent_snapshots %}
+                    <tr>
+                        <td>#{{ entry.snapshot.id }}</td>
+                        <td>{{ entry.snapshot.label|default:"No label" }}</td>
+                        <td><span class="status-pill status-{{ entry.snapshot.status }}">{{ entry.snapshot.status }}</span></td>
+                        <td>{{ entry.snapshot.environment|default:"-" }}</td>
+                        <td>{{ entry.counts.findings }}</td>
+                        <td>{{ entry.counts.queries }}</td>
+                        <td><a class="btn-action" href="{% url 'db_monitor:snapshot-overview' entry.snapshot.id %}">Inspect</a></td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="7">No snapshots collected yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{% endblock %}

@@ -1,0 +1,70 @@
+{% extends "db_monitor/base.html" %}
+
+{% block title %}Snapshot Comparison{% endblock %}
+
+{% block content %}
+<div class="monitor-shell">
+    <div class="monitor-hero">
+        <div class="monitor-title">
+            <h1>Snapshot comparison</h1>
+            <p>Before/after view backed by the existing `compare_snapshots` service.</p>
+        </div>
+        <a class="button-link" href="{% url 'db_monitor:overview' %}">Back to dashboard</a>
+    </div>
+
+    <form method="get" class="compare-form panel panel-body">
+        <label>Snapshot A
+            <select name="snapshot_a">
+                <option value="">Choose snapshot</option>
+                {% for snapshot_option in snapshot_options %}
+                <option value="{{ snapshot_option.id }}" {% if snapshot_a and snapshot_option.id == snapshot_a.id %}selected{% endif %}>#{{ snapshot_option.id }} {{ snapshot_option.label|default:"No label" }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>Snapshot B
+            <select name="snapshot_b">
+                <option value="">Choose snapshot</option>
+                {% for snapshot_option in snapshot_options %}
+                <option value="{{ snapshot_option.id }}" {% if snapshot_b and snapshot_option.id == snapshot_b.id %}selected{% endif %}>#{{ snapshot_option.id }} {{ snapshot_option.label|default:"No label" }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button class="button-link" type="submit">Compare</button>
+    </form>
+
+    {% if summary %}
+    <div class="metrics-grid">
+        <div class="metric-card"><div class="label">Findings Delta</div><div class="value">{{ summary.findings.totals.delta }}</div><div class="subvalue">{{ summary.findings.totals.before }} to {{ summary.findings.totals.after }}</div></div>
+        <div class="metric-card"><div class="label">After Query Exec</div><div class="value">{{ summary.queries.totals.after.total_exec_time|floatformat:2 }}</div><div class="subvalue">total ms</div></div>
+        <div class="metric-card"><div class="label">After Seq Scans</div><div class="value">{{ summary.tables.totals.after.seq_scan }}</div><div class="subvalue">table scan count</div></div>
+        <div class="metric-card"><div class="label">After Index Usage</div><div class="value">{{ summary.indexes.totals.after.idx_scan }}</div><div class="subvalue">idx scan count</div></div>
+    </div>
+
+    <div class="split-grid">
+        <section class="panel"><div class="panel-header"><h2>Top query regressions</h2></div><div class="panel-body"><ul class="summary-list">{% for entry in summary.queries.top_regressions %}<li><strong>{{ entry.queryid|default:entry.query_preview }}</strong><br><span class="muted">Total delta {{ entry.total_exec_time.delta|floatformat:2 }} ms | Mean delta {{ entry.mean_exec_time.delta|floatformat:2 }} ms</span></li>{% empty %}<li>No regressions detected.</li>{% endfor %}</ul></div></section>
+        <section class="panel"><div class="panel-header"><h2>Top improvements</h2></div><div class="panel-body"><ul class="summary-list">{% for entry in summary.queries.top_improvements %}<li><strong>{{ entry.queryid|default:entry.query_preview }}</strong><br><span class="muted">Total delta {{ entry.total_exec_time.delta|floatformat:2 }} ms | Mean delta {{ entry.mean_exec_time.delta|floatformat:2 }} ms</span></li>{% empty %}<li>No improvements detected.</li>{% endfor %}</ul></div></section>
+    </div>
+
+    <div class="split-grid" style="margin-top: 18px;">
+        <section class="panel"><div class="panel-header"><h2>Table scan deltas</h2></div><div class="panel-body"><ul class="summary-list">{% for entry in summary.tables.top_seq_scan_increases %}<li><strong>{{ entry.table }}</strong><br><span class="muted">Seq delta {{ entry.seq_scan.delta }} | Idx delta {{ entry.idx_scan.delta }}</span></li>{% empty %}<li>No table increases detected.</li>{% endfor %}</ul></div></section>
+        <section class="panel">
+            <div class="panel-header"><h2>Finding changes</h2></div>
+            <div class="panel-body">
+                <ul class="summary-list">
+                    {% for finding in summary.findings.new %}
+                    <li><span class="severity-pill severity-{{ finding.severity }}">{{ finding.severity }}</span> <strong>New:</strong> {{ finding.type }}{% if finding.object_name %} | {{ finding.object_name }}{% endif %}</li>
+                    {% empty %}
+                    <li>No new findings introduced.</li>
+                    {% endfor %}
+                    {% for finding in summary.findings.resolved %}
+                    <li><span class="severity-pill severity-{{ finding.severity }}">{{ finding.severity }}</span> <strong>Resolved:</strong> {{ finding.type }}{% if finding.object_name %} | {{ finding.object_name }}{% endif %}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </section>
+    </div>
+    {% else %}
+    <section class="panel"><div class="panel-header"><h2>Choose two snapshots</h2></div><div class="panel-body"><p>No comparison is loaded yet. Select snapshot A and snapshot B to render the before/after report.</p></div></section>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,59 @@
+{% extends "shop/base.html" %}
+
+{% block extra_css %}
+<style>
+    .monitor-shell { max-width: 1280px; margin: 36px auto; padding: 0 20px 48px; }
+    .monitor-hero { display: flex; justify-content: space-between; gap: 24px; align-items: end; margin-bottom: 24px; }
+    .monitor-title h1 { margin: 0; font-size: 34px; }
+    .monitor-title p { margin: 8px 0 0; color: var(--text-light); max-width: 760px; }
+    .monitor-nav, .section-tabs, .inline-meta { display: flex; gap: 10px; flex-wrap: wrap; }
+    .monitor-nav { margin-bottom: 24px; }
+    .monitor-nav a, .section-tabs a {
+        text-decoration: none; color: var(--text-dark); background: rgba(255,255,255,.45);
+        border: 1px solid var(--border-color); border-radius: 999px; padding: 10px 16px; font-weight: 600;
+    }
+    .section-tabs { margin-bottom: 20px; }
+    .section-tabs a.is-active { background: var(--card-header); }
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .split-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+    .metric-card, .panel {
+        background: rgba(255,255,255,.55); border: 1px solid var(--border-color); border-radius: var(--radius);
+        box-shadow: var(--shadow);
+    }
+    .metric-card { padding: 18px; }
+    .metric-card .label { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-light); }
+    .metric-card .value { font-size: 28px; font-weight: 700; margin-top: 8px; }
+    .metric-card .subvalue { color: var(--text-light); font-size: 14px; margin-top: 6px; }
+    .panel { overflow: hidden; }
+    .panel-header { padding: 16px 20px; border-bottom: 1px solid var(--border-color); background: rgba(76,224,177,.28); }
+    .panel-header h2, .panel-header h3 { margin: 0; font-size: 18px; }
+    .panel-header p { margin: 6px 0 0; color: var(--text-light); font-size: 14px; }
+    .panel-body { padding: 18px 20px 22px; }
+    .severity-pill, .status-pill {
+        display: inline-flex; align-items: center; border-radius: 999px; padding: 6px 10px;
+        font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+    }
+    .severity-high, .status-failed { background: #ffd4cc; color: #8b2f1c; }
+    .severity-medium, .status-degraded { background: #ffeab8; color: #8b6400; }
+    .severity-low, .status-completed { background: #d2f7e9; color: #17644a; }
+    .status-skipped { background: #e6eef2; color: #4b5f6c; }
+    .summary-list, .detail-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+    .summary-list li, .detail-list li {
+        padding: 14px 16px; border: 1px solid var(--border-color); border-radius: 12px; background: rgba(255,255,255,.45);
+    }
+    .key-value { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+    .key-value div, .compare-form label { display: grid; gap: 4px; }
+    .compare-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; align-items: end; margin-bottom: 24px; }
+    .compare-form select {
+        padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border-color); background: rgba(255,255,255,.8);
+    }
+    .button-link {
+        display: inline-block; padding: 12px 18px; border-radius: 10px; border: 0; text-decoration: none;
+        background: var(--primary-color); color: white; font-weight: 700;
+    }
+    .muted { color: var(--text-light); }
+    code { white-space: pre-wrap; }
+    @media (max-width: 800px) { .monitor-hero { flex-direction: column; align-items: start; } }
+</style>
+{% block monitor_extra_css %}{% endblock %}
+{% endblock %}
