@@ -16,7 +16,7 @@ Sequence the work so the team can reach a working MVP without getting blocked by
 4. Completed: Monitoring collectors, snapshots, and statistics models.
 5. Completed: First heuristics, findings, and severity.
 6. In progress: Validate the PostgreSQL baseline on a live runtime and execute the first before/after experiment.
-7. Later: Dashboard, tables, and richer reporting views.
+7. Completed: Dashboard, tables, and richer reporting views over stored snapshot data.
 
 ## Minimum MVP To Deliver
 
@@ -31,6 +31,10 @@ Remaining MVP:
 
 * validate the controlled issues on PostgreSQL,
 * run the real before/after comparison on collected PostgreSQL snapshots.
+
+Already delivered beyond the previous MVP boundary:
+
+* a classic reporting layer for snapshot overview, rankings, findings, and comparison views.
 
 ## Tasks
 
