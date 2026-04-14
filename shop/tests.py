@@ -68,3 +68,23 @@ class ShopApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["user"]["username"], self.user.username)
         self.assertEqual(payload["orders"][0]["items"][0]["product_slug"], self.product.slug)
+
+    def test_products_page_renders_visual_catalog(self):
+        response = self.client.get(reverse("shop:products-page"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Top popularity")
+        self.assertContains(response, self.product.name)
+
+    def test_users_page_renders_visual_summary(self):
+        response = self.client.get(reverse("shop:users-page"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "User distribution")
+        self.assertContains(response, self.user.username)
+
+    def test_sales_report_page_renders_graphical_report(self):
+        response = self.client.get(reverse("shop:sales-report-page"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Revenue by category")

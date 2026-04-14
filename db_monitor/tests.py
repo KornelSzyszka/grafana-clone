@@ -5,7 +5,7 @@ from django.urls import reverse
 from db_monitor.collectors import collect_stats_snapshot
 from db_monitor.heuristics import analyze_snapshot
 from db_monitor.services.comparison import compare_snapshots
-from db_monitor.services.reporting import get_dashboard_overview, get_snapshot_report
+from db_monitor.services.reporting import get_comparison_report, get_dashboard_overview, get_snapshot_report
 from db_monitor.models import AnalysisFinding, IndexStatSnapshot, QueryStatSnapshot, StatsSnapshot, TableStatSnapshot
 
 
@@ -428,3 +428,10 @@ class ReportingDashboardTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Snapshot comparison")
         self.assertContains(response, "Top query regressions")
+
+    def test_comparison_report_builds_index_recommendations_for_product_search(self):
+        report = get_comparison_report(self.before.id, self.after.id, top=5)
+
+        self.assertTrue(report["index_advisories"])
+        self.assertEqual(report["index_advisories"][0]["target"]["table"], "public.shop_product")
+        self.assertIn("CREATE INDEX", report["index_advisories"][0]["target"]["sql"])

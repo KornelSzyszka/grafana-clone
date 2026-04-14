@@ -94,6 +94,47 @@
             {% endif %}
         </div>
     </section>
+    {% if index_advisories %}
+    <section class="panel" style="margin-top: 18px;">
+        <div class="panel-header"><h2>Index recommendations</h2></div>
+        <div class="panel-body">
+            <ul class="detail-list">
+                {% for advisory in index_advisories %}
+                <li>
+                    <div class="inline-meta">
+                        <strong>{{ advisory.title }}</strong>
+                        <span class="muted">{{ advisory.target.table }}</span>
+                    </div>
+                    <p class="muted">{{ advisory.reason }}</p>
+                    <div class="key-value">
+                        <div><span class="label">Target field</span><strong>{{ advisory.target.field }}</strong></div>
+                        <div><span class="label">Recommended location</span><strong>{{ advisory.target.recommended_location }}</strong></div>
+                        <div><span class="label">Before total ms</span><strong>{{ advisory.query_comparison.before_total_ms|floatformat:2 }}</strong></div>
+                        <div><span class="label">After total ms</span><strong>{{ advisory.query_comparison.after_total_ms|floatformat:2 }}</strong></div>
+                        <div><span class="label">Before mean ms</span><strong>{{ advisory.query_comparison.before_mean_ms|floatformat:2 }}</strong></div>
+                        <div><span class="label">After mean ms</span><strong>{{ advisory.query_comparison.after_mean_ms|floatformat:2 }}</strong></div>
+                    </div>
+                    {% if advisory.table_comparison %}
+                    <div class="key-value" style="margin-top: 12px;">
+                        <div><span class="label">Seq scans before</span><strong>{{ advisory.table_comparison.before_seq_scan }}</strong></div>
+                        <div><span class="label">Seq scans after</span><strong>{{ advisory.table_comparison.after_seq_scan }}</strong></div>
+                        <div><span class="label">Idx scans before</span><strong>{{ advisory.table_comparison.before_idx_scan }}</strong></div>
+                        <div><span class="label">Idx scans after</span><strong>{{ advisory.table_comparison.after_idx_scan }}</strong></div>
+                    </div>
+                    {% endif %}
+                    <p><strong>Django index:</strong> {{ advisory.target.django_index }}</p>
+                    <code>{{ advisory.target.sql }}</code>
+                    <ul class="summary-list" style="margin-top: 12px;">
+                        {% for item in advisory.expected_impact %}
+                        <li>{{ item }}</li>
+                        {% endfor %}
+                    </ul>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </section>
+    {% endif %}
     {% else %}
     <section class="panel"><div class="panel-header"><h2>Choose two snapshots</h2></div><div class="panel-body"><p>No comparison is loaded yet. Select snapshot A and snapshot B to render the before/after report.</p></div></section>
     {% endif %}

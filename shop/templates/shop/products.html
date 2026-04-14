@@ -4,60 +4,30 @@
 
 {% block extra_css %}
 <style>
-    /* Kolumna ceny */
-    .price-tag {
-        font-weight: 700;
-        color: var(--text-dark);
-        font-size: 15px;
+    .hero-grid, .split-panels { display: grid; gap: 18px; margin-bottom: 24px; }
+    .hero-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+    .split-panels { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+    .hero-stat, .mini-panel {
+        background: rgba(255,255,255,.45);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius);
+        padding: 18px;
     }
-
-    /* Badge stanu magazynowego */
-    .stock-badge {
-        padding: 4px 10px;
-        border-radius: 20px;
-        font-size: 11px;
-        font-weight: 700;
-        text-transform: uppercase;
-    }
+    .hero-stat strong { display: block; font-size: 28px; margin-top: 6px; }
+    .chart-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+    .chart-row { display: grid; gap: 6px; }
+    .chart-label { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; font-weight: 600; }
+    .chart-bar { height: 10px; background: rgba(45, 52, 54, 0.08); border-radius: 999px; overflow: hidden; }
+    .chart-bar span { display: block; height: 100%; background: linear-gradient(90deg, #f59e0b, #facc15); }
+    .price-tag { font-weight: 700; color: var(--text-dark); font-size: 15px; }
+    .stock-badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
     .stock-ok { background: #e3fcef; color: #01896e; }
     .stock-low { background: #fff5f5; color: #ff7675; }
-
-    /* Pasek popularności - UNIKALNE DLA PRODUKTÓW */
-    .pop-container {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        min-width: 120px;
-    }
-
-    .pop-bar-bg {
-        flex-grow: 1;
-        height: 8px;
-        background: #eee;
-        border-radius: 4px;
-        overflow: hidden;
-    }
-
-    .pop-bar-fill {
-        height: 100%;
-        background: #fdcb6e; /* Złoty kolor popularności */
-        border-radius: 4px;
-    }
-
-    .pop-value {
-        font-size: 12px;
-        font-weight: 700;
-        color: var(--text-light);
-        min-width: 30px;
-    }
-
-    .category-tag {
-        font-size: 11px;
-        background: var(--border-color);
-        padding: 2px 8px;
-        border-radius: 4px;
-        color: var(--text-light);
-    }
+    .pop-container { display: flex; align-items: center; gap: 12px; min-width: 120px; }
+    .pop-bar-bg { flex-grow: 1; height: 8px; background: #eee; border-radius: 4px; overflow: hidden; }
+    .pop-bar-fill { height: 100%; background: #fdcb6e; border-radius: 4px; }
+    .pop-value { font-size: 12px; font-weight: 700; color: var(--text-light); min-width: 30px; }
+    .category-tag { font-size: 11px; background: var(--border-color); padding: 2px 8px; border-radius: 4px; color: var(--text-light); }
 </style>
 {% endblock %}
 
@@ -65,7 +35,44 @@
 <div class="page-container">
     <div class="page-header">
         <h1>Products</h1>
-        <p>List of products in the system ({{ count }})</p>
+        <p>Graficzny przegląd katalogu produktów oraz sygnałów, które potem wchodzą do monitoringu bazy danych.</p>
+    </div>
+
+    <div class="hero-grid">
+        <div class="hero-stat"><span>Visible products</span><strong>{{ count }}</strong></div>
+        <div class="hero-stat"><span>Low stock on page</span><strong>{{ summary.low_stock }}</strong></div>
+        <div class="hero-stat"><span>Healthy stock</span><strong>{{ summary.high_stock }}</strong></div>
+        <div class="hero-stat"><span>Average popularity</span><strong>{{ summary.avg_popularity }}%</strong></div>
+    </div>
+
+    <div class="split-panels">
+        <section class="mini-panel">
+            <h2 style="margin-top: 0;">Top popularity</h2>
+            <ul class="chart-list">
+                {% for row in charts.popular_products %}
+                <li class="chart-row">
+                    <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.value }}{{ row.suffix }}</span></div>
+                    <div class="chart-bar"><span style="width: {{ row.width }}%;"></span></div>
+                </li>
+                {% empty %}
+                <li>No product popularity data yet.</li>
+                {% endfor %}
+            </ul>
+        </section>
+
+        <section class="mini-panel">
+            <h2 style="margin-top: 0;">Categories on this page</h2>
+            <ul class="chart-list">
+                {% for row in charts.categories %}
+                <li class="chart-row">
+                    <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.value }}</span></div>
+                    <div class="chart-bar"><span style="width: {{ row.width }}%;"></span></div>
+                </li>
+                {% empty %}
+                <li>No category mix available.</li>
+                {% endfor %}
+            </ul>
+        </section>
     </div>
 
     <div class="content-card">
@@ -78,43 +85,21 @@
                         <th>Price</th>
                         <th>Stock</th>
                         <th>Popularity</th>
-                        <th style="text-align: right;">Product Page</th>
+                        <th style="text-align: right;">API</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for item in items %}
                     <tr>
-                        <td>
-                            <div style="font-weight: 600;">{{ item.name }}</div>
-                            <div style="font-size: 11px; color: var(--text-light);">slug: {{ item.slug }}</div>
-                        </td>
+                        <td><div style="font-weight: 600;">{{ item.name }}</div><div style="font-size: 11px; color: var(--text-light);">slug: {{ item.slug }}</div></td>
                         <td><span class="category-tag">{{ item.category }}</span></td>
                         <td class="price-tag">{{ item.price }} <small>PLN</small></td>
-                        <td>
-                            {% if item.stock > 10 %}
-                                <span class="stock-badge stock-ok">Available ({{ item.stock }})</span>
-                            {% else %}
-                                <span class="stock-badge stock-low">Low stock ({{ item.stock }})</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <div class="pop-container">
-                                <div class="pop-bar-bg">
-                                    <div class="pop-bar-fill" style="width: {{ item.popularity_score }}%;"></div>
-                                </div>
-                                <span class="pop-value">{{ item.popularity_score }}%</span>
-                            </div>
-                        </td>
-                        <td style="text-align: right;">
-                            <a href="/api/products/{{ item.slug }}/" class="btn-action">Page</a>
-                        </td>
+                        <td>{% if item.stock > 10 %}<span class="stock-badge stock-ok">Available ({{ item.stock }})</span>{% else %}<span class="stock-badge stock-low">Low stock ({{ item.stock }})</span>{% endif %}</td>
+                        <td><div class="pop-container"><div class="pop-bar-bg"><div class="pop-bar-fill" style="width: {{ item.popularity_score }}%;"></div></div><span class="pop-value">{{ item.popularity_score }}%</span></div></td>
+                        <td style="text-align: right;"><a href="/api/products/{{ item.slug }}/" class="btn-action">JSON</a></td>
                     </tr>
                     {% empty %}
-                    <tr>
-                        <td colspan="6" style="text-align: center; padding: 40px; color: var(--text-light);">
-                            Did not find any products.
-                        </td>
-                    </tr>
+                    <tr><td colspan="6" style="text-align: center; padding: 40px; color: var(--text-light);">Did not find any products.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>

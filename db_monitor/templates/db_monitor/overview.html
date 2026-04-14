@@ -73,6 +73,18 @@
                     </li>
                     {% endfor %}
                 </ul>
+                {% if comparison.index_advisories %}
+                <ul class="detail-list" style="margin-top: 16px;">
+                    {% for advisory in comparison.index_advisories %}
+                    <li>
+                        <strong>{{ advisory.title }}</strong>
+                        <p class="muted">{{ advisory.reason }}</p>
+                        <p><strong>Recommended location:</strong> {{ advisory.target.recommended_location }}</p>
+                        <code>{{ advisory.target.sql }}</code>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
                 {% else %}
                 <p>No comparison is available yet. Collect at least two snapshots to unlock the before/after view.</p>
                 {% endif %}

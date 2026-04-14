@@ -24,6 +24,10 @@ def _query_label(preview, queryid, limit=88):
     return _normalize_query(preview, limit=limit) or queryid or "Query without fingerprint"
 
 
+def _index_ddl(index_name, table_name, columns):
+    return f"CREATE INDEX {index_name} ON {table_name} ({columns});"
+
+
 def _chart_rows(rows, value_key, label_key="label", top=None):
     rows = list(rows[:top] if top else rows)
     if not rows:
@@ -71,6 +75,120 @@ def _finding_display_name(finding):
     if finding.object_type == "query":
         return finding.evidence_json.get("query_preview") or finding.object_name or finding.title
     return finding.object_name or finding.title
+
+
+def _build_index_advisories(summary):
+    advisories = []
+    query_entries = summary["queries"]["top_regressions"] + summary["queries"]["top_improvements"]
+    table_entries = summary["tables"]["top_seq_scan_increases"]
+
+    created_at_query = None
+    for entry in query_entries:
+        preview = entry.get("query_preview", "")
+        if "shop_product" in preview and "created_at" in preview:
+            created_at_query = entry
+            break
+
+    created_at_table = next(
+        (entry for entry in table_entries if entry["table"] == "public.shop_product"),
+        None,
+    )
+
+    if created_at_query or created_at_table:
+        advisories.append(
+            {
+                "slug": "product-created-at",
+                "title": "Index recommendation for recent product filtering",
+                "reason": (
+                    "The catalog flow filters or sorts by Product.created_at and the controlled-issues setup "
+                    "intentionally leaves that column without an index."
+                ),
+                "target": {
+                    "model": "shop.models.Product",
+                    "field": "created_at",
+                    "table": "public.shop_product",
+                    "django_index": 'models.Index(fields=["-created_at"], name="shop_product_created_at_idx")',
+                    "sql": _index_ddl(
+                        "shop_product_created_at_idx",
+                        "shop_product",
+                        "created_at DESC",
+                    ),
+                    "recommended_location": "Product.Meta.indexes in shop/models.py",
+                },
+                "query_comparison": {
+                    "label": (created_at_query or {}).get("query_label", "Recent product query"),
+                    "before_total_ms": (created_at_query or {}).get("total_exec_time", {}).get("before", 0),
+                    "after_total_ms": (created_at_query or {}).get("total_exec_time", {}).get("after", 0),
+                    "delta_total_ms": (created_at_query or {}).get("total_exec_time", {}).get("delta", 0),
+                    "before_mean_ms": (created_at_query or {}).get("mean_exec_time", {}).get("before", 0),
+                    "after_mean_ms": (created_at_query or {}).get("mean_exec_time", {}).get("after", 0),
+                    "delta_mean_ms": (created_at_query or {}).get("mean_exec_time", {}).get("delta", 0),
+                    "before_calls": (created_at_query or {}).get("calls", {}).get("before", 0),
+                    "after_calls": (created_at_query or {}).get("calls", {}).get("after", 0),
+                },
+                "table_comparison": {
+                    "before_seq_scan": (created_at_table or {}).get("seq_scan", {}).get("before", 0),
+                    "after_seq_scan": (created_at_table or {}).get("seq_scan", {}).get("after", 0),
+                    "delta_seq_scan": (created_at_table or {}).get("seq_scan", {}).get("delta", 0),
+                    "before_idx_scan": (created_at_table or {}).get("idx_scan", {}).get("before", 0),
+                    "after_idx_scan": (created_at_table or {}).get("idx_scan", {}).get("after", 0),
+                    "delta_idx_scan": (created_at_table or {}).get("idx_scan", {}).get("delta", 0),
+                },
+                "expected_impact": [
+                    "fewer sequential scans on shop_product for recent-product listings",
+                    "lower mean execution time for newest-product filters",
+                    "more stable catalog latency when the dataset grows",
+                ],
+            }
+        )
+
+    text_search_query = next(
+        (
+            entry
+            for entry in query_entries
+            if "shop_product" in entry.get("query_preview", "")
+            and "ILIKE" in entry.get("query_preview", "")
+        ),
+        None,
+    )
+    if text_search_query:
+        advisories.append(
+            {
+                "slug": "product-search",
+                "title": "Search indexing opportunity for product text lookup",
+                "reason": "Repeated ILIKE search on product name/description is showing up in the workload.",
+                "target": {
+                    "model": "shop.models.Product",
+                    "field": "name / description",
+                    "table": "public.shop_product",
+                    "django_index": "Prefer PostgreSQL trigram or full-text index added via migration.",
+                    "sql": (
+                        "CREATE INDEX shop_product_name_trgm_idx "
+                        "ON shop_product USING gin (name gin_trgm_ops);"
+                    ),
+                    "recommended_location": "Dedicated PostgreSQL migration for text-search optimization",
+                },
+                "query_comparison": {
+                    "label": text_search_query.get("query_label", "Product search query"),
+                    "before_total_ms": text_search_query.get("total_exec_time", {}).get("before", 0),
+                    "after_total_ms": text_search_query.get("total_exec_time", {}).get("after", 0),
+                    "delta_total_ms": text_search_query.get("total_exec_time", {}).get("delta", 0),
+                    "before_mean_ms": text_search_query.get("mean_exec_time", {}).get("before", 0),
+                    "after_mean_ms": text_search_query.get("mean_exec_time", {}).get("after", 0),
+                    "delta_mean_ms": text_search_query.get("mean_exec_time", {}).get("delta", 0),
+                    "before_calls": text_search_query.get("calls", {}).get("before", 0),
+                    "after_calls": text_search_query.get("calls", {}).get("after", 0),
+                },
+                "table_comparison": None,
+                "expected_impact": [
+                    "faster product search under repeated catalog filtering",
+                    "less CPU cost from broad ILIKE scans",
+                    "clearer separation between search and newest-product bottlenecks",
+                ],
+            }
+        )
+
+    return advisories
 
 
 def _severity_counts(findings):
@@ -364,6 +482,7 @@ def get_dashboard_overview(limit=5):
                     },
                 ]
             ),
+            "index_advisories": _build_index_advisories(summary),
         }
 
     return {
@@ -435,4 +554,5 @@ def get_comparison_report(snapshot_a_id, snapshot_b_id, top=10):
                 for severity, metrics in summary["findings"]["by_severity"].items()
             ]
         ),
+        "index_advisories": _build_index_advisories(summary),
     }
