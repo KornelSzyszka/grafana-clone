@@ -45,11 +45,7 @@ def product_list_view(_request):
         created_after_days=int(created_after_days) if created_after_days else None,
     )
 
-    return render(_request, "shop/products.html", payload)
-
-    '''
     return JsonResponse(payload)
-    '''
 
 
 @require_GET

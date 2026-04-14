@@ -38,7 +38,7 @@ def _severity_counts(findings):
 
 
 def _snapshot_queryset():
-    return StatsSnapshot.objects.prefetch_related(
+    return StatsSnapshot.objects.order_by("-created_at", "-id").prefetch_related(
         Prefetch("query_stats", queryset=QueryStatSnapshot.objects.order_by("-total_exec_time", "-calls")),
         Prefetch("table_stats", queryset=TableStatSnapshot.objects.order_by("-seq_scan", "-n_live_tup")),
         Prefetch("index_stats", queryset=IndexStatSnapshot.objects.order_by("idx_scan", "-index_size_bytes")),
