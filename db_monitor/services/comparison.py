@@ -52,9 +52,12 @@ def _query_entry(before_stat, after_stat):
         queryid = after_stat.queryid or queryid
         preview_source = after_stat.query_text_normalized or preview_source
 
+    display_name = _truncate(preview_source, limit=90) or queryid or "Query without fingerprint"
+
     return {
         "queryid": queryid,
         "query_preview": _truncate(preview_source, limit=160),
+        "query_label": display_name,
         "calls": _metric_block(getattr(before_stat, "calls", 0), getattr(after_stat, "calls", 0)),
         "total_exec_time": _metric_block(
             getattr(before_stat, "total_exec_time", 0),
@@ -250,6 +253,9 @@ def _summarize_findings(snapshot_a, snapshot_b):
             "severity": before_keys[key].severity,
             "title": before_keys[key].title,
             "object_name": before_keys[key].object_name,
+            "display_name": before_keys[key].evidence_json.get("query_preview")
+            or before_keys[key].object_name
+            or before_keys[key].title,
         }
         for key in sorted(set(before_keys) - set(after_keys))
     ]
@@ -259,6 +265,9 @@ def _summarize_findings(snapshot_a, snapshot_b):
             "severity": after_keys[key].severity,
             "title": after_keys[key].title,
             "object_name": after_keys[key].object_name,
+            "display_name": after_keys[key].evidence_json.get("query_preview")
+            or after_keys[key].object_name
+            or after_keys[key].title,
         }
         for key in sorted(set(after_keys) - set(before_keys))
     ]

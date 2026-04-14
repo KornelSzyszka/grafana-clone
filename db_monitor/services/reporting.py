@@ -13,14 +13,6 @@ from db_monitor.models import (
 from db_monitor.services.comparison import compare_snapshots
 
 
-def _metric_delta(before, after):
-    return {
-        "before": before,
-        "after": after,
-        "delta": after - before,
-    }
-
-
 def _normalize_query(text, limit=160):
     compact = " ".join((text or "").split())
     if len(compact) <= limit:
@@ -28,13 +20,66 @@ def _normalize_query(text, limit=160):
     return f"{compact[: limit - 3]}..."
 
 
+def _query_label(preview, queryid, limit=88):
+    return _normalize_query(preview, limit=limit) or queryid or "Query without fingerprint"
+
+
+def _chart_rows(rows, value_key, label_key="label", top=None):
+    rows = list(rows[:top] if top else rows)
+    if not rows:
+        return []
+
+    max_value = max((row.get(value_key, 0) or 0) for row in rows) or 1
+    chart = []
+    for row in rows:
+        value = row.get(value_key, 0) or 0
+        chart.append(
+            {
+                "label": row.get(label_key, ""),
+                "value": value,
+                "percent": round((value / max_value) * 100, 2),
+                "meta": row.get("meta", ""),
+            }
+        )
+    return chart
+
+
+def _paired_chart_rows(rows):
+    rows = list(rows)
+    max_value = 1
+    for row in rows:
+        max_value = max(max_value, row.get("before", 0) or 0, row.get("after", 0) or 0)
+
+    chart = []
+    for row in rows:
+        before = row.get("before", 0) or 0
+        after = row.get("after", 0) or 0
+        chart.append(
+            {
+                "label": row["label"],
+                "before": before,
+                "after": after,
+                "before_percent": round((before / max_value) * 100, 2),
+                "after_percent": round((after / max_value) * 100, 2),
+                "delta": after - before,
+            }
+        )
+    return chart
+
+
+def _finding_display_name(finding):
+    if finding.object_type == "query":
+        return finding.evidence_json.get("query_preview") or finding.object_name or finding.title
+    return finding.object_name or finding.title
+
+
 def _severity_counts(findings):
     counts = Counter(finding.severity for finding in findings)
-    return [
-        {"severity": severity, "count": counts[severity]}
-        for severity in ["high", "medium", "low"]
-        if counts.get(severity)
-    ]
+    ordered = []
+    for severity in ["high", "medium", "low"]:
+        if counts.get(severity):
+            ordered.append({"severity": severity, "count": counts[severity]})
+    return ordered
 
 
 def _snapshot_queryset():
@@ -49,42 +94,57 @@ def _snapshot_queryset():
 
 def _query_rankings(snapshot, limit):
     query_stats = list(snapshot.query_stats.all())
+    ranked = [
+        {
+            "queryid": row.queryid,
+            "label": _query_label(row.query_text_normalized, row.queryid),
+            "preview": _normalize_query(row.query_text_normalized),
+            "calls": row.calls,
+            "total_exec_time": row.total_exec_time,
+            "mean_exec_time": row.mean_exec_time,
+            "max_exec_time": row.max_exec_time,
+            "rows": row.rows,
+        }
+        for row in query_stats
+    ]
     slowest = sorted(
-        query_stats,
-        key=lambda row: (row.mean_exec_time, row.max_exec_time, row.total_exec_time),
+        ranked,
+        key=lambda row: (row["mean_exec_time"], row["max_exec_time"], row["total_exec_time"]),
         reverse=True,
     )[:limit]
     hottest = sorted(
-        query_stats,
-        key=lambda row: (row.total_exec_time, row.calls, row.mean_exec_time),
+        ranked,
+        key=lambda row: (row["total_exec_time"], row["calls"], row["mean_exec_time"]),
         reverse=True,
     )[:limit]
     return {
-        "slowest": [
-            {
-                "queryid": row.queryid,
-                "preview": _normalize_query(row.query_text_normalized),
-                "calls": row.calls,
-                "total_exec_time": row.total_exec_time,
-                "mean_exec_time": row.mean_exec_time,
-                "max_exec_time": row.max_exec_time,
-                "rows": row.rows,
-            }
-            for row in slowest
-        ],
-        "hottest": [
-            {
-                "queryid": row.queryid,
-                "preview": _normalize_query(row.query_text_normalized),
-                "calls": row.calls,
-                "total_exec_time": row.total_exec_time,
-                "mean_exec_time": row.mean_exec_time,
-                "max_exec_time": row.max_exec_time,
-                "rows": row.rows,
-            }
-            for row in hottest
-        ],
-        "all": query_stats,
+        "slowest": slowest,
+        "hottest": hottest,
+        "all": ranked,
+        "charts": {
+            "hot_exec_time": _chart_rows(
+                [
+                    {
+                        "label": row["label"],
+                        "total_exec_time": row["total_exec_time"],
+                        "meta": f"{row['calls']} calls | mean {row['mean_exec_time']:.2f} ms",
+                    }
+                    for row in hottest
+                ],
+                "total_exec_time",
+            ),
+            "slow_mean_time": _chart_rows(
+                [
+                    {
+                        "label": row["label"],
+                        "mean_exec_time": row["mean_exec_time"],
+                        "meta": f"max {row['max_exec_time']:.2f} ms",
+                    }
+                    for row in slowest
+                ],
+                "mean_exec_time",
+            ),
+        },
     }
 
 
@@ -96,6 +156,7 @@ def _table_rankings(snapshot, limit):
         ranked.append(
             {
                 "table": f"{row.schema_name}.{row.table_name}",
+                "label": f"{row.table_name} ({row.schema_name})",
                 "seq_scan": row.seq_scan,
                 "idx_scan": row.idx_scan,
                 "n_live_tup": row.n_live_tup,
@@ -111,6 +172,19 @@ def _table_rankings(snapshot, limit):
     return {
         "problematic": problematic,
         "all": ranked,
+        "charts": {
+            "seq_scans": _chart_rows(
+                [
+                    {
+                        "label": row["label"],
+                        "seq_scan": row["seq_scan"],
+                        "meta": f"ratio {row['seq_to_idx_ratio']:.2f}",
+                    }
+                    for row in problematic
+                ],
+                "seq_scan",
+            )
+        },
     }
 
 
@@ -118,15 +192,30 @@ def _index_rankings(snapshot, limit):
     ranked = [
         {
             "index": f"{row.schema_name}.{row.index_name}",
+            "label": row.index_name,
             "table": f"{row.schema_name}.{row.table_name}",
             "idx_scan": row.idx_scan,
             "index_size_bytes": row.index_size_bytes,
         }
         for row in snapshot.index_stats.all()
     ]
+    underused = sorted(ranked, key=lambda row: (row["idx_scan"], -row["index_size_bytes"]))[:limit]
     return {
-        "underused": sorted(ranked, key=lambda row: (row["idx_scan"], -row["index_size_bytes"]))[:limit],
+        "underused": underused,
         "all": ranked,
+        "charts": {
+            "underused_indexes": _chart_rows(
+                [
+                    {
+                        "label": row["label"],
+                        "index_size_bytes": row["index_size_bytes"],
+                        "meta": f"idx_scan {row['idx_scan']}",
+                    }
+                    for row in underused
+                ],
+                "index_size_bytes",
+            )
+        },
     }
 
 
@@ -134,6 +223,7 @@ def _activity_rankings(snapshot, limit):
     activities = [
         {
             "pid": row.pid,
+            "label": f"PID {row.pid}",
             "state": row.state,
             "wait_event_type": row.wait_event_type,
             "wait_event": row.wait_event,
@@ -142,29 +232,59 @@ def _activity_rankings(snapshot, limit):
         }
         for row in snapshot.activities.all()
     ]
+    longest = activities[:limit]
     return {
-        "longest": activities[:limit],
+        "longest": longest,
         "all": activities,
+        "charts": {
+            "activity_duration": _chart_rows(
+                [
+                    {
+                        "label": row["label"],
+                        "duration_ms": row["duration_ms"],
+                        "meta": row["state"] or "unknown state",
+                    }
+                    for row in longest
+                ],
+                "duration_ms",
+            )
+        },
     }
 
 
 def _finding_rankings(snapshot, limit):
     findings = list(snapshot.findings.all())
+    top = [
+        {
+            "type": finding.type,
+            "severity": finding.severity,
+            "title": finding.title,
+            "description": finding.description,
+            "object_type": finding.object_type,
+            "object_name": finding.object_name,
+            "display_name": _finding_display_name(finding),
+            "evidence_json": finding.evidence_json,
+        }
+        for finding in findings[:limit]
+    ]
+    severity = _severity_counts(findings)
     return {
-        "by_severity": _severity_counts(findings),
-        "top": [
-            {
-                "type": finding.type,
-                "severity": finding.severity,
-                "title": finding.title,
-                "description": finding.description,
-                "object_type": finding.object_type,
-                "object_name": finding.object_name,
-                "evidence_json": finding.evidence_json,
-            }
-            for finding in findings[:limit]
-        ],
+        "by_severity": severity,
+        "top": top,
         "all": findings,
+        "charts": {
+            "severity": _chart_rows(
+                [
+                    {
+                        "label": item["severity"],
+                        "count": item["count"],
+                        "meta": f"{item['count']} findings",
+                    }
+                    for item in severity
+                ],
+                "count",
+            )
+        },
     }
 
 
@@ -176,6 +296,8 @@ def _snapshot_summary(snapshot):
     activities = list(snapshot.activities.all())
     metadata_counts = (snapshot.metadata_json or {}).get("counts", {})
     query_rankings = _query_rankings(snapshot, 5)
+    table_rankings = _table_rankings(snapshot, 5)
+    finding_rankings = _finding_rankings(snapshot, 5)
 
     return {
         "snapshot": snapshot,
@@ -192,13 +314,19 @@ def _snapshot_summary(snapshot):
             "total_seq_scans": sum(row.seq_scan for row in table_stats),
             "total_idx_scans": sum(row.idx_scan for row in table_stats),
         },
-        "severity_counts": _severity_counts(findings),
+        "severity_counts": finding_rankings["by_severity"],
         "top_slow_queries": query_rankings["slowest"],
         "top_hot_queries": query_rankings["hottest"],
-        "problematic_tables": _table_rankings(snapshot, 5)["problematic"],
+        "problematic_tables": table_rankings["problematic"],
         "underused_indexes": _index_rankings(snapshot, 5)["underused"],
         "longest_activities": _activity_rankings(snapshot, 5)["longest"],
-        "top_findings": _finding_rankings(snapshot, 5)["top"],
+        "top_findings": finding_rankings["top"],
+        "charts": {
+            "hot_queries": query_rankings["charts"]["hot_exec_time"],
+            "slow_queries": query_rankings["charts"]["slow_mean_time"],
+            "table_scans": table_rankings["charts"]["seq_scans"],
+            "finding_severity": finding_rankings["charts"]["severity"],
+        },
     }
 
 
@@ -212,13 +340,29 @@ def get_dashboard_overview(limit=5):
         comparison = {
             "summary": summary,
             "findings_delta": summary["findings"]["totals"]["delta"],
-            "query_total_exec_time": _metric_delta(
-                summary["queries"]["totals"]["before"]["total_exec_time"],
-                summary["queries"]["totals"]["after"]["total_exec_time"],
-            ),
-            "seq_scan_total": _metric_delta(
-                summary["tables"]["totals"]["before"]["seq_scan"],
-                summary["tables"]["totals"]["after"]["seq_scan"],
+            "workload_chart": _paired_chart_rows(
+                [
+                    {
+                        "label": "Total exec time",
+                        "before": summary["queries"]["totals"]["before"]["total_exec_time"],
+                        "after": summary["queries"]["totals"]["after"]["total_exec_time"],
+                    },
+                    {
+                        "label": "Query calls",
+                        "before": summary["queries"]["totals"]["before"]["calls"],
+                        "after": summary["queries"]["totals"]["after"]["calls"],
+                    },
+                    {
+                        "label": "Seq scans",
+                        "before": summary["tables"]["totals"]["before"]["seq_scan"],
+                        "after": summary["tables"]["totals"]["after"]["seq_scan"],
+                    },
+                    {
+                        "label": "Index scans",
+                        "before": summary["tables"]["totals"]["before"]["idx_scan"],
+                        "after": summary["tables"]["totals"]["after"]["idx_scan"],
+                    },
+                ]
             ),
         }
 
@@ -232,23 +376,63 @@ def get_dashboard_overview(limit=5):
 
 def get_snapshot_report(snapshot_id, ranking_limit=10):
     snapshot = _snapshot_queryset().get(id=snapshot_id)
+    queries = _query_rankings(snapshot, ranking_limit)
+    tables = _table_rankings(snapshot, ranking_limit)
+    indexes = _index_rankings(snapshot, ranking_limit)
+    activities = _activity_rankings(snapshot, ranking_limit)
+    findings = _finding_rankings(snapshot, ranking_limit)
     return {
         "snapshot": snapshot,
         "summary": _snapshot_summary(snapshot),
-        "queries": _query_rankings(snapshot, ranking_limit),
-        "tables": _table_rankings(snapshot, ranking_limit),
-        "indexes": _index_rankings(snapshot, ranking_limit),
-        "activities": _activity_rankings(snapshot, ranking_limit),
-        "findings": _finding_rankings(snapshot, ranking_limit),
+        "queries": queries,
+        "tables": tables,
+        "indexes": indexes,
+        "activities": activities,
+        "findings": findings,
     }
 
 
 def get_comparison_report(snapshot_a_id, snapshot_b_id, top=10):
     snapshot_a = StatsSnapshot.objects.get(id=snapshot_a_id)
     snapshot_b = StatsSnapshot.objects.get(id=snapshot_b_id)
+    summary = compare_snapshots(snapshot_a, snapshot_b, top=top)
     return {
         "snapshot_a": snapshot_a,
         "snapshot_b": snapshot_b,
-        "summary": compare_snapshots(snapshot_a, snapshot_b, top=top),
-        "snapshot_options": StatsSnapshot.objects.all()[:10],
+        "summary": summary,
+        "snapshot_options": StatsSnapshot.objects.order_by("-created_at", "-id")[:10],
+        "workload_chart": _paired_chart_rows(
+            [
+                {
+                    "label": "Total exec time",
+                    "before": summary["queries"]["totals"]["before"]["total_exec_time"],
+                    "after": summary["queries"]["totals"]["after"]["total_exec_time"],
+                },
+                {
+                    "label": "Query calls",
+                    "before": summary["queries"]["totals"]["before"]["calls"],
+                    "after": summary["queries"]["totals"]["after"]["calls"],
+                },
+                {
+                    "label": "Seq scans",
+                    "before": summary["tables"]["totals"]["before"]["seq_scan"],
+                    "after": summary["tables"]["totals"]["after"]["seq_scan"],
+                },
+                {
+                    "label": "Index scans",
+                    "before": summary["tables"]["totals"]["before"]["idx_scan"],
+                    "after": summary["tables"]["totals"]["after"]["idx_scan"],
+                },
+            ]
+        ),
+        "finding_severity_chart": _paired_chart_rows(
+            [
+                {
+                    "label": severity.title(),
+                    "before": metrics["before"],
+                    "after": metrics["after"],
+                }
+                for severity, metrics in summary["findings"]["by_severity"].items()
+            ]
+        ),
     }

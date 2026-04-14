@@ -41,8 +41,8 @@
     </div>
 
     <div class="split-grid">
-        <section class="panel"><div class="panel-header"><h2>Top query regressions</h2></div><div class="panel-body"><ul class="summary-list">{% for entry in summary.queries.top_regressions %}<li><strong>{{ entry.queryid|default:entry.query_preview }}</strong><br><span class="muted">Total delta {{ entry.total_exec_time.delta|floatformat:2 }} ms | Mean delta {{ entry.mean_exec_time.delta|floatformat:2 }} ms</span></li>{% empty %}<li>No regressions detected.</li>{% endfor %}</ul></div></section>
-        <section class="panel"><div class="panel-header"><h2>Top improvements</h2></div><div class="panel-body"><ul class="summary-list">{% for entry in summary.queries.top_improvements %}<li><strong>{{ entry.queryid|default:entry.query_preview }}</strong><br><span class="muted">Total delta {{ entry.total_exec_time.delta|floatformat:2 }} ms | Mean delta {{ entry.mean_exec_time.delta|floatformat:2 }} ms</span></li>{% empty %}<li>No improvements detected.</li>{% endfor %}</ul></div></section>
+        <section class="panel"><div class="panel-header"><h2>Top query regressions</h2></div><div class="panel-body"><ul class="summary-list">{% for entry in summary.queries.top_regressions %}<li><strong>{{ entry.query_label }}</strong><br><span class="muted">Total delta {{ entry.total_exec_time.delta|floatformat:2 }} ms | Mean delta {{ entry.mean_exec_time.delta|floatformat:2 }} ms</span>{% if entry.queryid %}<br><span class="muted">Fingerprint {{ entry.queryid }}</span>{% endif %}</li>{% empty %}<li>No regressions detected.</li>{% endfor %}</ul></div></section>
+        <section class="panel"><div class="panel-header"><h2>Top improvements</h2></div><div class="panel-body"><ul class="summary-list">{% for entry in summary.queries.top_improvements %}<li><strong>{{ entry.query_label }}</strong><br><span class="muted">Total delta {{ entry.total_exec_time.delta|floatformat:2 }} ms | Mean delta {{ entry.mean_exec_time.delta|floatformat:2 }} ms</span>{% if entry.queryid %}<br><span class="muted">Fingerprint {{ entry.queryid }}</span>{% endif %}</li>{% empty %}<li>No improvements detected.</li>{% endfor %}</ul></div></section>
     </div>
 
     <div class="split-grid" style="margin-top: 18px;">
@@ -52,17 +52,48 @@
             <div class="panel-body">
                 <ul class="summary-list">
                     {% for finding in summary.findings.new %}
-                    <li><span class="severity-pill severity-{{ finding.severity }}">{{ finding.severity }}</span> <strong>New:</strong> {{ finding.type }}{% if finding.object_name %} | {{ finding.object_name }}{% endif %}</li>
+                    <li><span class="severity-pill severity-{{ finding.severity }}">{{ finding.severity }}</span> <strong>New:</strong> {{ finding.type }}{% if finding.display_name %} | {{ finding.display_name }}{% endif %}</li>
                     {% empty %}
                     <li>No new findings introduced.</li>
                     {% endfor %}
                     {% for finding in summary.findings.resolved %}
-                    <li><span class="severity-pill severity-{{ finding.severity }}">{{ finding.severity }}</span> <strong>Resolved:</strong> {{ finding.type }}{% if finding.object_name %} | {{ finding.object_name }}{% endif %}</li>
+                    <li><span class="severity-pill severity-{{ finding.severity }}">{{ finding.severity }}</span> <strong>Resolved:</strong> {{ finding.type }}{% if finding.display_name %} | {{ finding.display_name }}{% endif %}</li>
                     {% endfor %}
                 </ul>
             </div>
         </section>
     </div>
+    <section class="panel" style="margin-top: 18px;">
+        <div class="panel-header"><h2>Workload charts</h2></div>
+        <div class="panel-body">
+            <ul class="paired-chart">
+                {% for row in workload_chart %}
+                <li>
+                    <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.delta|floatformat:2 }}</span></div>
+                    <div class="paired-bars">
+                        <div class="bar-track"><div class="bar-fill paired-before" style="width: {{ row.before_percent }}%;"></div></div>
+                        <div class="bar-track"><div class="bar-fill paired-after" style="width: {{ row.after_percent }}%;"></div></div>
+                    </div>
+                    <div class="paired-bar-labels"><span>Before {{ row.before|floatformat:2 }}</span><span>After {{ row.after|floatformat:2 }}</span></div>
+                </li>
+                {% endfor %}
+            </ul>
+            {% if finding_severity_chart %}
+            <ul class="paired-chart" style="margin-top: 16px;">
+                {% for row in finding_severity_chart %}
+                <li>
+                    <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.delta }}</span></div>
+                    <div class="paired-bars">
+                        <div class="bar-track"><div class="bar-fill paired-before" style="width: {{ row.before_percent }}%;"></div></div>
+                        <div class="bar-track"><div class="bar-fill paired-after" style="width: {{ row.after_percent }}%;"></div></div>
+                    </div>
+                    <div class="paired-bar-labels"><span>Before {{ row.before }}</span><span>After {{ row.after }}</span></div>
+                </li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </div>
+    </section>
     {% else %}
     <section class="panel"><div class="panel-header"><h2>Choose two snapshots</h2></div><div class="panel-body"><p>No comparison is loaded yet. Select snapshot A and snapshot B to render the before/after report.</p></div></section>
     {% endif %}

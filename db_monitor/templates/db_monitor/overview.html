@@ -36,7 +36,7 @@
                 </div>
                 <ul class="summary-list" style="margin-top: 16px;">
                     {% for finding in latest_snapshot.top_findings %}
-                    <li><strong>{{ finding.title }}</strong><br><span class="severity-pill severity-{{ finding.severity }}">{{ finding.severity }}</span> <span class="muted">{{ finding.type }}{% if finding.object_name %} | {{ finding.object_name }}{% endif %}</span></li>
+                    <li><strong>{{ finding.title }}</strong><br><span class="severity-pill severity-{{ finding.severity }}">{{ finding.severity }}</span> <span class="muted">{{ finding.type }}{% if finding.display_name %} | {{ finding.display_name }}{% endif %}</span></li>
                     {% empty %}
                     <li>No findings recorded for the latest snapshot.</li>
                     {% endfor %}
@@ -56,9 +56,21 @@
                 </div>
                 <ul class="summary-list" style="margin-top: 16px;">
                     {% for entry in comparison.summary.queries.top_regressions %}
-                    <li><strong>{{ entry.queryid|default:entry.query_preview }}</strong><br><span class="muted">Total exec delta {{ entry.total_exec_time.delta|floatformat:2 }} ms | Mean delta {{ entry.mean_exec_time.delta|floatformat:2 }} ms</span></li>
+                    <li><strong>{{ entry.query_label }}</strong><br><span class="muted">Total exec delta {{ entry.total_exec_time.delta|floatformat:2 }} ms | Mean delta {{ entry.mean_exec_time.delta|floatformat:2 }} ms</span></li>
                     {% empty %}
                     <li>No query regressions in the latest comparison.</li>
+                    {% endfor %}
+                </ul>
+                <ul class="paired-chart" style="margin-top: 16px;">
+                    {% for row in comparison.workload_chart %}
+                    <li>
+                        <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.delta|floatformat:2 }}</span></div>
+                        <div class="paired-bars">
+                            <div class="bar-track"><div class="bar-fill paired-before" style="width: {{ row.before_percent }}%;"></div></div>
+                            <div class="bar-track"><div class="bar-fill paired-after" style="width: {{ row.after_percent }}%;"></div></div>
+                        </div>
+                        <div class="paired-bar-labels"><span>Before {{ row.before|floatformat:2 }}</span><span>After {{ row.after|floatformat:2 }}</span></div>
+                    </li>
                     {% endfor %}
                 </ul>
                 {% else %}
@@ -71,15 +83,37 @@
     <div class="split-grid" style="margin-top: 18px;">
         <section class="panel">
             <div class="panel-header"><h3>Top slow queries</h3></div>
-            <div class="panel-body"><ul class="summary-list">{% for query in latest_snapshot.top_slow_queries %}<li><strong>{{ query.queryid|default:query.preview }}</strong><br><span class="muted">Mean {{ query.mean_exec_time|floatformat:2 }} ms | Max {{ query.max_exec_time|floatformat:2 }} ms</span></li>{% empty %}<li>No query stats available.</li>{% endfor %}</ul></div>
+            <div class="panel-body"><ul class="summary-list">{% for query in latest_snapshot.top_slow_queries %}<li><strong>{{ query.label }}</strong><br><span class="muted">Mean {{ query.mean_exec_time|floatformat:2 }} ms | Max {{ query.max_exec_time|floatformat:2 }} ms</span></li>{% empty %}<li>No query stats available.</li>{% endfor %}</ul></div>
         </section>
         <section class="panel">
             <div class="panel-header"><h3>Hot queries</h3></div>
-            <div class="panel-body"><ul class="summary-list">{% for query in latest_snapshot.top_hot_queries %}<li><strong>{{ query.queryid|default:query.preview }}</strong><br><span class="muted">Total {{ query.total_exec_time|floatformat:2 }} ms | Calls {{ query.calls }}</span></li>{% empty %}<li>No query stats available.</li>{% endfor %}</ul></div>
+            <div class="panel-body">
+                <ul class="summary-list">{% for query in latest_snapshot.top_hot_queries %}<li><strong>{{ query.label }}</strong><br><span class="muted">Total {{ query.total_exec_time|floatformat:2 }} ms | Calls {{ query.calls }}</span></li>{% empty %}<li>No query stats available.</li>{% endfor %}</ul>
+                <ul class="bar-chart" style="margin-top: 16px;">
+                    {% for row in latest_snapshot.charts.hot_queries %}
+                    <li>
+                        <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.value|floatformat:2 }} ms</span></div>
+                        <div class="bar-track"><div class="bar-fill" style="width: {{ row.percent }}%;"></div></div>
+                        <div class="chart-meta">{{ row.meta }}</div>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
         </section>
         <section class="panel">
             <div class="panel-header"><h3>Problematic tables</h3></div>
-            <div class="panel-body"><ul class="summary-list">{% for table in latest_snapshot.problematic_tables %}<li><strong>{{ table.table }}</strong><br><span class="muted">Seq scans {{ table.seq_scan }} | Ratio {{ table.seq_to_idx_ratio|floatformat:2 }}</span></li>{% empty %}<li>No table stats available.</li>{% endfor %}</ul></div>
+            <div class="panel-body">
+                <ul class="summary-list">{% for table in latest_snapshot.problematic_tables %}<li><strong>{{ table.table }}</strong><br><span class="muted">Seq scans {{ table.seq_scan }} | Ratio {{ table.seq_to_idx_ratio|floatformat:2 }}</span></li>{% empty %}<li>No table stats available.</li>{% endfor %}</ul>
+                <ul class="bar-chart" style="margin-top: 16px;">
+                    {% for row in latest_snapshot.charts.table_scans %}
+                    <li>
+                        <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.value }}</span></div>
+                        <div class="bar-track"><div class="bar-fill" style="width: {{ row.percent }}%;"></div></div>
+                        <div class="chart-meta">{{ row.meta }}</div>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
         </section>
     </div>
     {% else %}

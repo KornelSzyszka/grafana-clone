@@ -55,6 +55,15 @@
                     <li>No findings have been created for this snapshot.</li>
                     {% endfor %}
                 </ul>
+                <ul class="bar-chart" style="margin-top: 16px;">
+                    {% for row in summary.charts.finding_severity %}
+                    <li>
+                        <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.value }}</span></div>
+                        <div class="bar-track"><div class="bar-fill" style="width: {{ row.percent }}%;"></div></div>
+                        <div class="chart-meta">{{ row.meta }}</div>
+                    </li>
+                    {% endfor %}
+                </ul>
             </div>
         </section>
     </div>
@@ -62,7 +71,18 @@
     <div class="split-grid" style="margin-top: 18px;">
         <section class="panel">
             <div class="panel-header"><h3>Slow query ranking</h3></div>
-            <div class="panel-body"><ul class="summary-list">{% for query in queries.slowest %}<li><strong>{{ query.queryid|default:query.preview }}</strong><br><span class="muted">Mean {{ query.mean_exec_time|floatformat:2 }} ms | Total {{ query.total_exec_time|floatformat:2 }} ms</span></li>{% empty %}<li>No query stats available.</li>{% endfor %}</ul></div>
+            <div class="panel-body">
+                <ul class="summary-list">{% for query in queries.slowest %}<li><strong>{{ query.label }}</strong><br><span class="muted">Mean {{ query.mean_exec_time|floatformat:2 }} ms | Total {{ query.total_exec_time|floatformat:2 }} ms</span></li>{% empty %}<li>No query stats available.</li>{% endfor %}</ul>
+                <ul class="bar-chart" style="margin-top: 16px;">
+                    {% for row in summary.charts.slow_queries %}
+                    <li>
+                        <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.value|floatformat:2 }} ms</span></div>
+                        <div class="bar-track"><div class="bar-fill" style="width: {{ row.percent }}%;"></div></div>
+                        <div class="chart-meta">{{ row.meta }}</div>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
         </section>
 
         <section class="panel">

@@ -34,6 +34,14 @@ def _truncate_query(query_text, limit=180):
     return f"{query_text[: limit - 3]}..."
 
 
+def _query_display_name(queryid, preview):
+    return _truncate_query(preview or queryid or "Query without fingerprint", limit=90)
+
+
+def _query_object_name(queryid, preview):
+    return _truncate_query(preview or queryid or "Query without fingerprint", limit=180)
+
+
 def _severity_for_slow_query(mean_ms, max_ms):
     if mean_ms >= 500 or max_ms >= 1500:
         return "high"
@@ -76,13 +84,13 @@ def _slow_query_candidates(snapshot, thresholds):
             FindingCandidate(
                 type="slow_query",
                 severity=_severity_for_slow_query(query_stat.mean_exec_time, query_stat.max_exec_time),
-                title=f"Slow query detected ({query_stat.queryid or 'no-queryid'})",
+                title=f"Slow query detected: {_query_display_name(query_stat.queryid, preview)}",
                 description=(
                     "The query exceeds the configured execution-time threshold and should be reviewed for indexes, "
                     "join strategy, or application-side batching."
                 ),
                 object_type="query",
-                object_name=query_stat.queryid or preview,
+                object_name=_query_object_name(query_stat.queryid, preview),
                 evidence_json={
                     "queryid": query_stat.queryid,
                     "query_preview": preview,
@@ -109,13 +117,13 @@ def _hot_query_candidates(snapshot, thresholds):
             FindingCandidate(
                 type="hot_query",
                 severity=_severity_for_hot_query(query_stat.total_exec_time, query_stat.calls),
-                title=f"High-cost hot query ({query_stat.queryid or 'no-queryid'})",
+                title=f"High-cost hot query: {_query_display_name(query_stat.queryid, preview)}",
                 description=(
                     "The query contributes a large cumulative execution cost. Even if single runs are acceptable, "
                     "its frequency makes it a likely optimization target."
                 ),
                 object_type="query",
-                object_name=query_stat.queryid or preview,
+                object_name=_query_object_name(query_stat.queryid, preview),
                 evidence_json={
                     "queryid": query_stat.queryid,
                     "query_preview": preview,

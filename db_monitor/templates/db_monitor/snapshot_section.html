@@ -29,7 +29,7 @@
                     <thead><tr><th>Query</th><th>Mean ms</th><th>Max ms</th><th>Total ms</th><th>Calls</th></tr></thead>
                     <tbody>
                         {% for query in queries.slowest %}
-                        <tr><td><strong>{{ query.queryid|default:"no-queryid" }}</strong><br><span class="muted">{{ query.preview }}</span></td><td>{{ query.mean_exec_time|floatformat:2 }}</td><td>{{ query.max_exec_time|floatformat:2 }}</td><td>{{ query.total_exec_time|floatformat:2 }}</td><td>{{ query.calls }}</td></tr>
+                        <tr><td><strong>{{ query.label }}</strong><br><span class="muted">{{ query.preview }}</span>{% if query.queryid %}<br><span class="muted">Fingerprint {{ query.queryid }}</span>{% endif %}</td><td>{{ query.mean_exec_time|floatformat:2 }}</td><td>{{ query.max_exec_time|floatformat:2 }}</td><td>{{ query.total_exec_time|floatformat:2 }}</td><td>{{ query.calls }}</td></tr>
                         {% empty %}
                         <tr><td colspan="5">No query stats available.</td></tr>
                         {% endfor %}
@@ -45,12 +45,21 @@
                     <thead><tr><th>Query</th><th>Total ms</th><th>Mean ms</th><th>Calls</th><th>Rows</th></tr></thead>
                     <tbody>
                         {% for query in queries.hottest %}
-                        <tr><td><strong>{{ query.queryid|default:"no-queryid" }}</strong><br><span class="muted">{{ query.preview }}</span></td><td>{{ query.total_exec_time|floatformat:2 }}</td><td>{{ query.mean_exec_time|floatformat:2 }}</td><td>{{ query.calls }}</td><td>{{ query.rows }}</td></tr>
+                        <tr><td><strong>{{ query.label }}</strong><br><span class="muted">{{ query.preview }}</span>{% if query.queryid %}<br><span class="muted">Fingerprint {{ query.queryid }}</span>{% endif %}</td><td>{{ query.total_exec_time|floatformat:2 }}</td><td>{{ query.mean_exec_time|floatformat:2 }}</td><td>{{ query.calls }}</td><td>{{ query.rows }}</td></tr>
                         {% empty %}
                         <tr><td colspan="5">No query stats available.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
+                <ul class="bar-chart" style="margin-top: 16px;">
+                    {% for row in queries.charts.hot_exec_time %}
+                    <li>
+                        <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.value|floatformat:2 }} ms</span></div>
+                        <div class="bar-track"><div class="bar-fill" style="width: {{ row.percent }}%;"></div></div>
+                        <div class="chart-meta">{{ row.meta }}</div>
+                    </li>
+                    {% endfor %}
+                </ul>
             </div>
         </section>
     </div>
@@ -109,13 +118,22 @@
             <ul class="detail-list">
                 {% for finding in findings.top %}
                 <li>
-                    <div class="inline-meta"><span class="severity-pill severity-{{ finding.severity }}">{{ finding.severity }}</span><strong>{{ finding.type }}</strong>{% if finding.object_name %}<span class="muted">{{ finding.object_name }}</span>{% endif %}</div>
+                    <div class="inline-meta"><span class="severity-pill severity-{{ finding.severity }}">{{ finding.severity }}</span><strong>{{ finding.type }}</strong>{% if finding.display_name %}<span class="muted">{{ finding.display_name }}</span>{% endif %}</div>
                     <p><strong>{{ finding.title }}</strong></p>
                     <p class="muted">{{ finding.description }}</p>
                     {% if finding.evidence_json %}<code>{{ finding.evidence_json }}</code>{% endif %}
                 </li>
                 {% empty %}
                 <li>No findings recorded for this snapshot.</li>
+                {% endfor %}
+            </ul>
+            <ul class="bar-chart" style="margin-top: 16px;">
+                {% for row in findings.charts.severity %}
+                <li>
+                    <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.value }}</span></div>
+                    <div class="bar-track"><div class="bar-fill" style="width: {{ row.percent }}%;"></div></div>
+                    <div class="chart-meta">{{ row.meta }}</div>
+                </li>
                 {% endfor %}
             </ul>
         </div>

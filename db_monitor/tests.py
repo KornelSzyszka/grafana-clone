@@ -404,6 +404,7 @@ class ReportingDashboardTests(TestCase):
 
         self.assertEqual(report["snapshot"].id, self.after.id)
         self.assertEqual(report["queries"]["slowest"][0]["queryid"], "after-query")
+        self.assertIn("SELECT * FROM shop_product", report["queries"]["slowest"][0]["label"])
         self.assertEqual(report["tables"]["problematic"][0]["table"], "public.shop_product")
         self.assertEqual(report["findings"]["top"][0]["type"], "slow_query")
 
