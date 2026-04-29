@@ -1,6 +1,7 @@
 from django.db import DatabaseError, connection, transaction
 
 from db_monitor.models import ActivitySnapshot, IndexStatSnapshot, QueryStatSnapshot, StatsSnapshot, TableStatSnapshot
+from db_monitor.services.index_experiments import get_experiment_index_state
 
 
 def _fetch_all(cursor, sql, params=None):
@@ -220,11 +221,13 @@ def collect_stats_snapshot(label="", environment="", query_limit=200, activity_l
     summary["table_stats"] = len(table_rows)
     summary["index_stats"] = len(index_rows)
     summary["activities"] = len(activity_rows)
+    experiment_state = get_experiment_index_state()
     snapshot.notes = "\n".join(notes)
     snapshot.metadata_json = {
         "query_limit": query_limit,
         "activity_limit": activity_limit,
         "include_activity": include_activity,
+        "index_experiment": experiment_state,
         "counts": {
             "query_stats": summary["query_stats"],
             "table_stats": summary["table_stats"],

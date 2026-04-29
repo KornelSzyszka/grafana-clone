@@ -120,6 +120,19 @@ class SnapshotComparisonTests(TestCase):
             database_vendor="postgresql",
             database_name="grafana_clone",
             status=StatsSnapshot.Status.COMPLETED,
+            metadata_json={
+                "index_experiment": {
+                    "mode": "without_indexes",
+                    "indexes": [
+                        {
+                            "name": "shop_product_created_at_idx",
+                            "table": "shop_product",
+                            "description": "Recent product filtering and newest-product sorting",
+                            "present": False,
+                        }
+                    ],
+                }
+            },
         )
         self.after = StatsSnapshot.objects.create(
             label="after",
@@ -127,6 +140,19 @@ class SnapshotComparisonTests(TestCase):
             database_vendor="postgresql",
             database_name="grafana_clone",
             status=StatsSnapshot.Status.COMPLETED,
+            metadata_json={
+                "index_experiment": {
+                    "mode": "with_indexes",
+                    "indexes": [
+                        {
+                            "name": "shop_product_created_at_idx",
+                            "table": "shop_product",
+                            "description": "Recent product filtering and newest-product sorting",
+                            "present": True,
+                        }
+                    ],
+                }
+            },
         )
 
         QueryStatSnapshot.objects.bulk_create(
@@ -265,6 +291,9 @@ class SnapshotComparisonTests(TestCase):
         self.assertEqual(summary["tables"]["top_seq_scan_decreases"][0]["table"], "public.shop_product")
         self.assertEqual(summary["findings"]["resolved"][0]["type"], "seq_scan_heavy_table")
         self.assertEqual(summary["findings"]["new"][0]["type"], "hot_query")
+        self.assertEqual(summary["index_experiment"]["before_mode"], "without_indexes")
+        self.assertEqual(summary["index_experiment"]["after_mode"], "with_indexes")
+        self.assertEqual(summary["index_experiment"]["changes"][0]["change"], "added")
 
     def test_compare_snapshots_command_supports_json_output(self):
         out = []
@@ -274,6 +303,59 @@ class SnapshotComparisonTests(TestCase):
         self.assertIn('"snapshot_a"', rendered)
         self.assertIn('"snapshot_b"', rendered)
         self.assertIn('"findings"', rendered)
+
+    def test_compare_snapshots_excludes_transaction_control_and_zero_delta_entries(self):
+        QueryStatSnapshot.objects.create(
+            snapshot=self.before,
+            queryid="begin-query",
+            query_text_normalized="BEGIN",
+            calls=10,
+            total_exec_time=1.0,
+            mean_exec_time=0.1,
+            min_exec_time=0.1,
+            max_exec_time=0.1,
+            rows=0,
+        )
+        QueryStatSnapshot.objects.create(
+            snapshot=self.after,
+            queryid="begin-query",
+            query_text_normalized="BEGIN",
+            calls=10,
+            total_exec_time=1.0,
+            mean_exec_time=0.1,
+            min_exec_time=0.1,
+            max_exec_time=0.1,
+            rows=0,
+        )
+        QueryStatSnapshot.objects.create(
+            snapshot=self.before,
+            queryid="steady-query",
+            query_text_normalized="SELECT 1",
+            calls=10,
+            total_exec_time=5.0,
+            mean_exec_time=0.5,
+            min_exec_time=0.5,
+            max_exec_time=0.5,
+            rows=10,
+        )
+        QueryStatSnapshot.objects.create(
+            snapshot=self.after,
+            queryid="steady-query",
+            query_text_normalized="SELECT 1",
+            calls=10,
+            total_exec_time=5.0,
+            mean_exec_time=0.5,
+            min_exec_time=0.5,
+            max_exec_time=0.5,
+            rows=10,
+        )
+
+        summary = compare_snapshots(self.before, self.after, top=10)
+        rendered_labels = [entry["query_label"] for entry in summary["queries"]["top_improvements"]]
+        rendered_labels += [entry["query_label"] for entry in summary["queries"]["top_regressions"]]
+
+        self.assertNotIn("BEGIN", rendered_labels)
+        self.assertNotIn("SELECT 1", rendered_labels)
 
 
 class Buffer:
@@ -292,7 +374,20 @@ class ReportingDashboardTests(TestCase):
             database_vendor="postgresql",
             database_name="grafana_clone",
             status=StatsSnapshot.Status.COMPLETED,
-            metadata_json={"counts": {"query_stats": 2, "table_stats": 1, "index_stats": 1, "activities": 0}},
+            metadata_json={
+                "counts": {"query_stats": 2, "table_stats": 1, "index_stats": 1, "activities": 0},
+                "index_experiment": {
+                    "mode": "without_indexes",
+                    "indexes": [
+                        {
+                            "name": "shop_product_created_at_idx",
+                            "table": "shop_product",
+                            "description": "Recent product filtering and newest-product sorting",
+                            "present": False,
+                        }
+                    ],
+                },
+            },
         )
         self.after = StatsSnapshot.objects.create(
             label="after",
@@ -300,7 +395,20 @@ class ReportingDashboardTests(TestCase):
             database_vendor="postgresql",
             database_name="grafana_clone",
             status=StatsSnapshot.Status.DEGRADED,
-            metadata_json={"counts": {"query_stats": 2, "table_stats": 1, "index_stats": 1, "activities": 1}},
+            metadata_json={
+                "counts": {"query_stats": 2, "table_stats": 1, "index_stats": 1, "activities": 1},
+                "index_experiment": {
+                    "mode": "with_indexes",
+                    "indexes": [
+                        {
+                            "name": "shop_product_created_at_idx",
+                            "table": "shop_product",
+                            "description": "Recent product filtering and newest-product sorting",
+                            "present": True,
+                        }
+                    ],
+                },
+            },
         )
 
         QueryStatSnapshot.objects.bulk_create(
@@ -435,3 +543,14 @@ class ReportingDashboardTests(TestCase):
         self.assertTrue(report["index_advisories"])
         self.assertEqual(report["index_advisories"][0]["target"]["table"], "public.shop_product")
         self.assertIn("CREATE INDEX", report["index_advisories"][0]["target"]["sql"])
+        self.assertTrue(report["index_experiment_story"]["is_valid_before_after"])
+
+
+class IndexExperimentCommandTests(TestCase):
+    def test_status_command_reports_unsupported_mode_on_sqlite(self):
+        out = []
+
+        call_command("configure_index_experiment", "status", stdout=Buffer(out))
+
+        rendered = "".join(out)
+        self.assertIn("Index experiment mode: unsupported", rendered)

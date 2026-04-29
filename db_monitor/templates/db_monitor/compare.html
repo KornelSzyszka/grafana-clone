@@ -39,10 +39,93 @@
         <div class="metric-card"><div class="label">After Seq Scans</div><div class="value">{{ summary.tables.totals.after.seq_scan }}</div><div class="subvalue">table scan count</div></div>
         <div class="metric-card"><div class="label">After Index Usage</div><div class="value">{{ summary.indexes.totals.after.idx_scan }}</div><div class="subvalue">idx scan count</div></div>
     </div>
+    {% if index_experiment_story %}
+    <section class="panel" style="margin-bottom: 18px;">
+        <div class="panel-header"><h2>Index experiment state</h2></div>
+        <div class="panel-body">
+            <div class="key-value">
+                <div><span class="label">Before snapshot mode</span><strong>{{ index_experiment_story.before_mode }}</strong></div>
+                <div><span class="label">After snapshot mode</span><strong>{{ index_experiment_story.after_mode }}</strong></div>
+                <div><span class="label">Expected flow</span><strong>{% if index_experiment_story.is_valid_before_after %}without indexes -> with indexes{% else %}manual review needed{% endif %}</strong></div>
+            </div>
+            <ul class="summary-list" style="margin-top: 16px;">
+                {% for change in index_experiment_story.changes %}
+                <li>
+                    <strong>{{ change.name }}</strong><br>
+                    <span class="muted">{{ change.table }} | {{ change.description }}</span><br>
+                    <span class="muted">before: {{ change.before_present }} | after: {{ change.after_present }} | change: {{ change.change }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </section>
+    {% endif %}
 
     <div class="split-grid">
-        <section class="panel"><div class="panel-header"><h2>Top query regressions</h2></div><div class="panel-body"><ul class="summary-list">{% for entry in summary.queries.top_regressions %}<li><strong>{{ entry.query_label }}</strong><br><span class="muted">Total delta {{ entry.total_exec_time.delta|floatformat:2 }} ms | Mean delta {{ entry.mean_exec_time.delta|floatformat:2 }} ms</span>{% if entry.queryid %}<br><span class="muted">Fingerprint {{ entry.queryid }}</span>{% endif %}</li>{% empty %}<li>No regressions detected.</li>{% endfor %}</ul></div></section>
-        <section class="panel"><div class="panel-header"><h2>Top improvements</h2></div><div class="panel-body"><ul class="summary-list">{% for entry in summary.queries.top_improvements %}<li><strong>{{ entry.query_label }}</strong><br><span class="muted">Total delta {{ entry.total_exec_time.delta|floatformat:2 }} ms | Mean delta {{ entry.mean_exec_time.delta|floatformat:2 }} ms</span>{% if entry.queryid %}<br><span class="muted">Fingerprint {{ entry.queryid }}</span>{% endif %}</li>{% empty %}<li>No improvements detected.</li>{% endfor %}</ul></div></section>
+        <section class="panel">
+            <div class="panel-header"><h2>Top query regressions</h2></div>
+            <div class="panel-body">
+                <ul class="summary-list">
+                    {% for entry in summary.queries.top_regressions %}
+                    <li>
+                        <strong>{{ entry.query_label }}</strong><br>
+                        <span class="muted">Total delta {{ entry.total_exec_time.delta|floatformat:2 }} ms | Mean delta {{ entry.mean_exec_time.delta|floatformat:2 }} ms</span>
+                        {% if entry.queryid %}<br><span class="muted">Fingerprint {{ entry.queryid }}</span>{% endif %}
+                        <ul class="paired-chart" style="margin-top: 12px;">
+                            <li>
+                                <div class="chart-label"><span>Total execution time</span><span>{{ entry.total_exec_time.before|floatformat:2 }} -> {{ entry.total_exec_time.after|floatformat:2 }} ms</span></div>
+                                <div class="paired-bars">
+                                    <div class="bar-track"><div class="bar-fill paired-before" style="width: {{ entry.total_exec_time.before_percent }}%;"></div></div>
+                                    <div class="bar-track"><div class="bar-fill paired-after" style="width: {{ entry.total_exec_time.after_percent }}%;"></div></div>
+                                </div>
+                            </li>
+                            <li>
+                                <div class="chart-label"><span>Mean execution time</span><span>{{ entry.mean_exec_time.before|floatformat:2 }} -> {{ entry.mean_exec_time.after|floatformat:2 }} ms</span></div>
+                                <div class="paired-bars">
+                                    <div class="bar-track"><div class="bar-fill paired-before" style="width: {{ entry.mean_exec_time.before_percent }}%;"></div></div>
+                                    <div class="bar-track"><div class="bar-fill paired-after" style="width: {{ entry.mean_exec_time.after_percent }}%;"></div></div>
+                                </div>
+                            </li>
+                        </ul>
+                    </li>
+                    {% empty %}
+                    <li>No regressions detected.</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </section>
+        <section class="panel">
+            <div class="panel-header"><h2>Top improvements</h2></div>
+            <div class="panel-body">
+                <ul class="summary-list">
+                    {% for entry in summary.queries.top_improvements %}
+                    <li>
+                        <strong>{{ entry.query_label }}</strong><br>
+                        <span class="muted">Total delta {{ entry.total_exec_time.delta|floatformat:2 }} ms | Mean delta {{ entry.mean_exec_time.delta|floatformat:2 }} ms</span>
+                        {% if entry.queryid %}<br><span class="muted">Fingerprint {{ entry.queryid }}</span>{% endif %}
+                        <ul class="paired-chart" style="margin-top: 12px;">
+                            <li>
+                                <div class="chart-label"><span>Total execution time</span><span>{{ entry.total_exec_time.before|floatformat:2 }} -> {{ entry.total_exec_time.after|floatformat:2 }} ms</span></div>
+                                <div class="paired-bars">
+                                    <div class="bar-track"><div class="bar-fill paired-before" style="width: {{ entry.total_exec_time.before_percent }}%;"></div></div>
+                                    <div class="bar-track"><div class="bar-fill paired-after" style="width: {{ entry.total_exec_time.after_percent }}%;"></div></div>
+                                </div>
+                            </li>
+                            <li>
+                                <div class="chart-label"><span>Mean execution time</span><span>{{ entry.mean_exec_time.before|floatformat:2 }} -> {{ entry.mean_exec_time.after|floatformat:2 }} ms</span></div>
+                                <div class="paired-bars">
+                                    <div class="bar-track"><div class="bar-fill paired-before" style="width: {{ entry.mean_exec_time.before_percent }}%;"></div></div>
+                                    <div class="bar-track"><div class="bar-fill paired-after" style="width: {{ entry.mean_exec_time.after_percent }}%;"></div></div>
+                                </div>
+                            </li>
+                        </ul>
+                    </li>
+                    {% empty %}
+                    <li>No improvements detected.</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </section>
     </div>
 
     <div class="split-grid" style="margin-top: 18px;">

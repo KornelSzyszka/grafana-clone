@@ -13,14 +13,18 @@ def _truncate(text, limit=120):
 def _metric_block(before_value, after_value):
     before_value = before_value or 0
     after_value = after_value or 0
+    scale = max(abs(before_value), abs(after_value), 1)
     return {
         "before": before_value,
         "after": after_value,
         "delta": after_value - before_value,
+        "before_percent": round((abs(before_value) / scale) * 100, 2),
+        "after_percent": round((abs(after_value) / scale) * 100, 2),
     }
 
 
 def _snapshot_descriptor(snapshot):
+    metadata = snapshot.metadata_json or {}
     return {
         "id": snapshot.id,
         "label": snapshot.label,
@@ -29,6 +33,44 @@ def _snapshot_descriptor(snapshot):
         "database_vendor": snapshot.database_vendor,
         "database_name": snapshot.database_name,
         "created_at": snapshot.created_at.isoformat(),
+        "index_experiment": metadata.get("index_experiment", {}),
+    }
+
+
+def _summarize_index_experiment(snapshot_a, snapshot_b):
+    before = (snapshot_a.metadata_json or {}).get("index_experiment", {})
+    after = (snapshot_b.metadata_json or {}).get("index_experiment", {})
+    before_indexes = {item["name"]: item for item in before.get("indexes", [])}
+    after_indexes = {item["name"]: item for item in after.get("indexes", [])}
+    changes = []
+
+    for index_name in sorted(set(before_indexes) | set(after_indexes)):
+        before_item = before_indexes.get(index_name, {})
+        after_item = after_indexes.get(index_name, {})
+        before_present = bool(before_item.get("present"))
+        after_present = bool(after_item.get("present"))
+        if before_present == after_present:
+            change = "unchanged"
+        elif after_present:
+            change = "added"
+        else:
+            change = "removed"
+
+        changes.append(
+            {
+                "name": index_name,
+                "description": after_item.get("description") or before_item.get("description") or "",
+                "table": after_item.get("table") or before_item.get("table") or "",
+                "before_present": before_present,
+                "after_present": after_present,
+                "change": change,
+            }
+        )
+
+    return {
+        "before_mode": before.get("mode", ""),
+        "after_mode": after.get("mode", ""),
+        "changes": changes,
     }
 
 
@@ -73,6 +115,32 @@ def _query_entry(before_stat, after_stat):
         ),
         "rows": _metric_block(getattr(before_stat, "rows", 0), getattr(after_stat, "rows", 0)),
     }
+
+
+def _is_transaction_control_query(entry):
+    preview = (entry.get("query_preview") or "").strip().upper()
+    return preview in {
+        "BEGIN",
+        "COMMIT",
+        "ROLLBACK",
+        "START TRANSACTION",
+    }
+
+
+def _is_meaningful_delta(metric, epsilon=0.001):
+    return abs(metric["delta"]) > epsilon
+
+
+def _is_meaningful_query_comparison(entry):
+    return (
+        entry["state"] == "changed"
+        and not _is_transaction_control_query(entry)
+        and (
+            _is_meaningful_delta(entry["total_exec_time"])
+            or _is_meaningful_delta(entry["mean_exec_time"])
+            or abs(entry["calls"]["delta"]) > 0
+        )
+    )
 
 
 def _table_key(table_stat):
@@ -132,11 +200,17 @@ def _summarize_queries(snapshot_a, snapshot_b, top):
             entry["state"] = "removed"
         entries.append(entry)
 
+    comparable_entries = [entry for entry in entries if _is_meaningful_query_comparison(entry)]
+
     regressions = sorted(
         [
             entry
-            for entry in entries
-            if entry["total_exec_time"]["delta"] > 0 or entry["mean_exec_time"]["delta"] > 0
+            for entry in comparable_entries
+            if entry["total_exec_time"]["delta"] > 0.001
+            or (
+                abs(entry["total_exec_time"]["delta"]) <= 0.001
+                and entry["mean_exec_time"]["delta"] > 0.001
+            )
         ],
         key=lambda item: (
             item["total_exec_time"]["delta"],
@@ -148,8 +222,12 @@ def _summarize_queries(snapshot_a, snapshot_b, top):
     improvements = sorted(
         [
             entry
-            for entry in entries
-            if entry["total_exec_time"]["delta"] < 0 or entry["mean_exec_time"]["delta"] < 0
+            for entry in comparable_entries
+            if entry["total_exec_time"]["delta"] < -0.001
+            or (
+                abs(entry["total_exec_time"]["delta"]) <= 0.001
+                and entry["mean_exec_time"]["delta"] < -0.001
+            )
         ],
         key=lambda item: (
             item["total_exec_time"]["delta"],
@@ -306,6 +384,7 @@ def compare_snapshots(snapshot_a, snapshot_b, top=5):
     return {
         "snapshot_a": _snapshot_descriptor(snapshot_a),
         "snapshot_b": _snapshot_descriptor(snapshot_b),
+        "index_experiment": _summarize_index_experiment(snapshot_a, snapshot_b),
         "queries": _summarize_queries(snapshot_a, snapshot_b, top),
         "tables": _summarize_tables(snapshot_a, snapshot_b, top),
         "indexes": _summarize_indexes(snapshot_a, snapshot_b, top),

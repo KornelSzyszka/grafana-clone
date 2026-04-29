@@ -191,6 +191,23 @@ def _build_index_advisories(summary):
     return advisories
 
 
+def _build_index_experiment_story(summary):
+    experiment = summary.get("index_experiment", {})
+    changes = experiment.get("changes", [])
+    if not changes:
+        return None
+
+    return {
+        "before_mode": experiment.get("before_mode") or "unknown",
+        "after_mode": experiment.get("after_mode") or "unknown",
+        "changes": changes,
+        "is_valid_before_after": (
+            experiment.get("before_mode") == "without_indexes"
+            and experiment.get("after_mode") == "with_indexes"
+        ),
+    }
+
+
 def _severity_counts(findings):
     counts = Counter(finding.severity for finding in findings)
     ordered = []
@@ -458,6 +475,7 @@ def get_dashboard_overview(limit=5):
         comparison = {
             "summary": summary,
             "findings_delta": summary["findings"]["totals"]["delta"],
+            "index_experiment_story": _build_index_experiment_story(summary),
             "workload_chart": _paired_chart_rows(
                 [
                     {
@@ -519,6 +537,7 @@ def get_comparison_report(snapshot_a_id, snapshot_b_id, top=10):
         "snapshot_a": snapshot_a,
         "snapshot_b": snapshot_b,
         "summary": summary,
+        "index_experiment_story": _build_index_experiment_story(summary),
         "snapshot_options": StatsSnapshot.objects.order_by("-created_at", "-id")[:10],
         "workload_chart": _paired_chart_rows(
             [
