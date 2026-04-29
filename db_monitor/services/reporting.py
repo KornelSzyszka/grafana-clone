@@ -50,21 +50,21 @@ def _chart_rows(rows, value_key, label_key="label", top=None):
 
 def _paired_chart_rows(rows):
     rows = list(rows)
-    max_value = 1
-    for row in rows:
-        max_value = max(max_value, row.get("before", 0) or 0, row.get("after", 0) or 0)
-
     chart = []
     for row in rows:
         before = row.get("before", 0) or 0
         after = row.get("after", 0) or 0
+        scale_max = max(abs(before), abs(after))
+        if scale_max <= 0:
+            scale_max = 1
         chart.append(
             {
                 "label": row["label"],
                 "before": before,
                 "after": after,
-                "before_percent": round((before / max_value) * 100, 2),
-                "after_percent": round((after / max_value) * 100, 2),
+                "before_percent": round((before / scale_max) * 100, 2),
+                "after_percent": round((after / scale_max) * 100, 2),
+                "scale_max": scale_max,
                 "delta": after - before,
             }
         )
@@ -200,7 +200,10 @@ def _build_index_experiment_story(summary):
     return {
         "before_mode": experiment.get("before_mode") or "unknown",
         "after_mode": experiment.get("after_mode") or "unknown",
+        "added_count": experiment.get("added_count", 0),
+        "removed_count": experiment.get("removed_count", 0),
         "changes": changes,
+        "selection_basis": [change["description"] for change in changes if change.get("description")],
         "is_valid_before_after": (
             experiment.get("before_mode") == "without_indexes"
             and experiment.get("after_mode") == "with_indexes"

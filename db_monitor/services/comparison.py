@@ -13,11 +13,14 @@ def _truncate(text, limit=120):
 def _metric_block(before_value, after_value):
     before_value = before_value or 0
     after_value = after_value or 0
-    scale = max(abs(before_value), abs(after_value), 1)
+    scale = max(abs(before_value), abs(after_value))
+    if scale <= 0:
+        scale = 1
     return {
         "before": before_value,
         "after": after_value,
         "delta": after_value - before_value,
+        "scale_max": scale,
         "before_percent": round((abs(before_value) / scale) * 100, 2),
         "after_percent": round((abs(after_value) / scale) * 100, 2),
     }
@@ -61,6 +64,7 @@ def _summarize_index_experiment(snapshot_a, snapshot_b):
                 "name": index_name,
                 "description": after_item.get("description") or before_item.get("description") or "",
                 "table": after_item.get("table") or before_item.get("table") or "",
+                "columns": after_item.get("columns") or before_item.get("columns") or "",
                 "before_present": before_present,
                 "after_present": after_present,
                 "change": change,
@@ -71,13 +75,18 @@ def _summarize_index_experiment(snapshot_a, snapshot_b):
         "before_mode": before.get("mode", ""),
         "after_mode": after.get("mode", ""),
         "changes": changes,
+        "added_count": sum(1 for change in changes if change["change"] == "added"),
+        "removed_count": sum(1 for change in changes if change["change"] == "removed"),
     }
 
 
 def _query_key(query_stat):
+    normalized_text = " ".join((query_stat.query_text_normalized or "").split())
+    if normalized_text:
+        return f"text:{normalized_text}"
     if query_stat.queryid:
         return f"queryid:{query_stat.queryid}"
-    return f"text:{' '.join(query_stat.query_text_normalized.split())}"
+    return "text:"
 
 
 def _finding_key(finding):
@@ -143,6 +152,23 @@ def _is_meaningful_query_comparison(entry):
     )
 
 
+def _entry_matches_index_change(entry, index_change):
+    preview = (entry.get("query_preview") or "").lower()
+    table_name = (index_change.get("table") or "").split(".")[-1].lower()
+    column_tokens = [
+        token.strip().lower()
+        for token in (index_change.get("columns") or "").replace("DESC", "").replace("ASC", "").split()
+        if token.strip() and token.strip().lower() not in {"using", "gin", "btree"}
+    ]
+    return bool(
+        preview
+        and (
+            (table_name and table_name in preview)
+            or any(token in preview for token in column_tokens)
+        )
+    )
+
+
 def _table_key(table_stat):
     return f"{table_stat.schema_name}.{table_stat.table_name}"
 
@@ -185,6 +211,7 @@ def _index_entry(before_stat, after_stat):
 
 
 def _summarize_queries(snapshot_a, snapshot_b, top):
+    index_experiment = _summarize_index_experiment(snapshot_a, snapshot_b)
     before_map = {_query_key(row): row for row in snapshot_a.query_stats.all()}
     after_map = {_query_key(row): row for row in snapshot_b.query_stats.all()}
     entries = []
@@ -234,7 +261,31 @@ def _summarize_queries(snapshot_a, snapshot_b, top):
             item["mean_exec_time"]["delta"],
             item["calls"]["delta"],
         ),
-    )[:top]
+    )
+
+    added_indexes = [change for change in index_experiment["changes"] if change["change"] == "added"]
+    prioritized_improvements = []
+    if (
+        index_experiment["before_mode"] == "without_indexes"
+        and index_experiment["after_mode"] == "with_indexes"
+        and added_indexes
+    ):
+        prioritized_improvements = [
+            entry
+            for entry in improvements
+            if any(_entry_matches_index_change(entry, change) for change in added_indexes)
+        ]
+
+    merged_improvements = []
+    seen_labels = set()
+    for entry in prioritized_improvements + improvements:
+        label = entry["query_label"]
+        if label in seen_labels:
+            continue
+        seen_labels.add(label)
+        merged_improvements.append(entry)
+        if len(merged_improvements) >= top:
+            break
 
     return {
         "totals": {
@@ -256,7 +307,7 @@ def _summarize_queries(snapshot_a, snapshot_b, top):
             "removed": sum(1 for entry in entries if entry["state"] == "removed"),
         },
         "top_regressions": regressions,
-        "top_improvements": improvements,
+        "top_improvements": merged_improvements,
     }
 
 

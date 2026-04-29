@@ -5,6 +5,7 @@ from django.urls import reverse
 from db_monitor.collectors import collect_stats_snapshot
 from db_monitor.heuristics import analyze_snapshot
 from db_monitor.services.comparison import compare_snapshots
+from db_monitor.services.index_experiments import recommend_experiment_indexes
 from db_monitor.services.reporting import get_comparison_report, get_dashboard_overview, get_snapshot_report
 from db_monitor.models import AnalysisFinding, IndexStatSnapshot, QueryStatSnapshot, StatsSnapshot, TableStatSnapshot
 
@@ -294,6 +295,7 @@ class SnapshotComparisonTests(TestCase):
         self.assertEqual(summary["index_experiment"]["before_mode"], "without_indexes")
         self.assertEqual(summary["index_experiment"]["after_mode"], "with_indexes")
         self.assertEqual(summary["index_experiment"]["changes"][0]["change"], "added")
+        self.assertEqual(summary["queries"]["top_improvements"][0]["mean_exec_time"]["scale_max"], 80)
 
     def test_compare_snapshots_command_supports_json_output(self):
         out = []
@@ -356,6 +358,44 @@ class SnapshotComparisonTests(TestCase):
 
         self.assertNotIn("BEGIN", rendered_labels)
         self.assertNotIn("SELECT 1", rendered_labels)
+
+    def test_compare_snapshots_matches_same_query_text_even_when_queryid_changes(self):
+        QueryStatSnapshot.objects.create(
+            snapshot=self.before,
+            queryid="before-created-at",
+            query_text_normalized="SELECT * FROM shop_product ORDER BY created_at DESC LIMIT 20",
+            calls=40,
+            total_exec_time=800.0,
+            mean_exec_time=20.0,
+            min_exec_time=8.0,
+            max_exec_time=55.0,
+            rows=800,
+        )
+        QueryStatSnapshot.objects.create(
+            snapshot=self.after,
+            queryid="after-created-at",
+            query_text_normalized="SELECT * FROM shop_product ORDER BY created_at DESC LIMIT 20",
+            calls=40,
+            total_exec_time=200.0,
+            mean_exec_time=5.0,
+            min_exec_time=2.0,
+            max_exec_time=20.0,
+            rows=800,
+        )
+
+        summary = compare_snapshots(self.before, self.after, top=5)
+        labels = [entry["query_label"] for entry in summary["queries"]["top_improvements"]]
+
+        self.assertTrue(
+            any("SELECT * FROM shop_product ORDER BY created_at DESC LIMIT 20" in label for label in labels)
+        )
+        created_at_entry = next(
+            entry
+            for entry in summary["queries"]["top_improvements"]
+            if "created_at DESC LIMIT 20" in entry["query_label"]
+        )
+        self.assertLess(created_at_entry["total_exec_time"]["after"], created_at_entry["total_exec_time"]["before"])
+        self.assertEqual(created_at_entry["mean_exec_time"]["scale_max"], 20.0)
 
 
 class Buffer:
@@ -544,6 +584,8 @@ class ReportingDashboardTests(TestCase):
         self.assertEqual(report["index_advisories"][0]["target"]["table"], "public.shop_product")
         self.assertIn("CREATE INDEX", report["index_advisories"][0]["target"]["sql"])
         self.assertTrue(report["index_experiment_story"]["is_valid_before_after"])
+        self.assertEqual(report["index_experiment_story"]["added_count"], 1)
+        self.assertEqual(report["workload_chart"][0]["scale_max"], 15000)
 
 
 class IndexExperimentCommandTests(TestCase):
@@ -554,3 +596,87 @@ class IndexExperimentCommandTests(TestCase):
 
         rendered = "".join(out)
         self.assertIn("Index experiment mode: unsupported", rendered)
+
+
+class IndexExperimentSelectionTests(TestCase):
+    def test_recommend_experiment_indexes_selects_multiple_candidates_from_slowest_queries(self):
+        snapshot = StatsSnapshot.objects.create(
+            label="before",
+            environment="baseline",
+            database_vendor="postgresql",
+            database_name="grafana_clone",
+            status=StatsSnapshot.Status.COMPLETED,
+        )
+        QueryStatSnapshot.objects.bulk_create(
+            [
+                QueryStatSnapshot(
+                    snapshot=snapshot,
+                    queryid="catalog-newest",
+                    query_text_normalized=(
+                        "SELECT * FROM shop_product WHERE is_active = true "
+                        "AND created_at >= $1 ORDER BY created_at DESC LIMIT 20"
+                    ),
+                    calls=80,
+                    total_exec_time=3200,
+                    mean_exec_time=40,
+                    min_exec_time=10,
+                    max_exec_time=120,
+                    rows=1000,
+                ),
+                QueryStatSnapshot(
+                    snapshot=snapshot,
+                    queryid="catalog-search",
+                    query_text_normalized=(
+                        "SELECT * FROM shop_product WHERE name ILIKE $1 OR description ILIKE $1"
+                    ),
+                    calls=60,
+                    total_exec_time=2800,
+                    mean_exec_time=46,
+                    min_exec_time=9,
+                    max_exec_time=150,
+                    rows=900,
+                ),
+                QueryStatSnapshot(
+                    snapshot=snapshot,
+                    queryid="order-history",
+                    query_text_normalized=(
+                        "SELECT * FROM shop_order WHERE user_id = $1 ORDER BY created_at DESC"
+                    ),
+                    calls=40,
+                    total_exec_time=2400,
+                    mean_exec_time=60,
+                    min_exec_time=14,
+                    max_exec_time=180,
+                    rows=500,
+                ),
+                QueryStatSnapshot(
+                    snapshot=snapshot,
+                    queryid="sales-report",
+                    query_text_normalized=(
+                        "SELECT * FROM shop_order WHERE status IN ($1, $2) AND created_at >= $3"
+                    ),
+                    calls=25,
+                    total_exec_time=2200,
+                    mean_exec_time=88,
+                    min_exec_time=20,
+                    max_exec_time=210,
+                    rows=300,
+                ),
+            ]
+        )
+
+        selected = recommend_experiment_indexes(snapshot=snapshot, limit=5)
+        names = [item["name"] for item in selected]
+
+        self.assertIn("shop_product_created_at_idx", names)
+        self.assertIn("shop_product_active_created_at_idx", names)
+        self.assertIn("shop_product_name_trgm_idx", names)
+        self.assertIn("shop_product_description_trgm_idx", names)
+        self.assertIn("shop_order_user_created_at_idx", names)
+
+    def test_recommend_experiment_indexes_falls_back_to_default_indexes_without_snapshot_data(self):
+        selected = recommend_experiment_indexes(snapshot=None, limit=5)
+        names = [item["name"] for item in selected]
+
+        self.assertIn("shop_product_created_at_idx", names)
+        self.assertIn("shop_product_name_trgm_idx", names)
