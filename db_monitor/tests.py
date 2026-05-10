@@ -8,6 +8,9 @@ from db_monitor.services.comparison import compare_snapshots
 from db_monitor.services.index_experiments import recommend_experiment_indexes
 from db_monitor.services.reporting import get_comparison_report, get_dashboard_overview, get_snapshot_report
 from db_monitor.models import AnalysisFinding, IndexStatSnapshot, QueryStatSnapshot, StatsSnapshot, TableStatSnapshot
+from db_monitor.models import ExperimentIndexDefinition, ExperimentIndexGroup
+from db_monitor.services.query_classification import classify_sql_operation
+from load_simulator.models import WorkloadRun
 
 
 class CollectorFallbackTests(TestCase):
@@ -21,10 +24,14 @@ class CollectorFallbackTests(TestCase):
         self.assertEqual(summary["query_stats"], 0)
 
     def test_collect_stats_command_creates_snapshot(self):
+        WorkloadRun.objects.create(scenario="catalog", seed=99, operations=3)
+
         call_command("collect_stats", label="command-test", environment="test")
 
         snapshot = StatsSnapshot.objects.get(label="command-test")
         self.assertEqual(snapshot.status, StatsSnapshot.Status.SKIPPED)
+        self.assertEqual(snapshot.workload_runs.count(), 1)
+        self.assertEqual(snapshot.metadata_json["workload_run"]["scenario"], "catalog")
 
 
 class AnalysisHeuristicsTests(TestCase):
@@ -94,6 +101,28 @@ class AnalysisHeuristicsTests(TestCase):
         self.assertEqual(summary["by_type"]["unused_index"], 1)
         self.assertEqual(summary["by_type"]["seq_scan_heavy_table"], 1)
         self.assertEqual(AnalysisFinding.objects.filter(snapshot=self.snapshot).count(), 5)
+
+    def test_analyze_snapshot_flags_covering_index_candidate(self):
+        QueryStatSnapshot.objects.create(
+            snapshot=self.snapshot,
+            queryid="catalog-covering",
+            query_text_normalized=(
+                "SELECT id, name, slug, price FROM shop_product "
+                "WHERE is_active = true AND created_at >= $1 ORDER BY created_at DESC LIMIT 50"
+            ),
+            calls=100,
+            total_exec_time=8000,
+            mean_exec_time=80,
+            min_exec_time=10,
+            max_exec_time=200,
+            rows=5000,
+        )
+
+        _, summary = analyze_snapshot(self.snapshot)
+
+        self.assertGreaterEqual(summary["by_type"]["covering_index_candidate"], 1)
+        finding = AnalysisFinding.objects.filter(snapshot=self.snapshot, type="covering_index_candidate").first()
+        self.assertEqual(finding.evidence_json["suggested_index"], "shop_product_covering_catalog_idx")
 
     def test_analyze_stats_command_replaces_existing_findings(self):
         AnalysisFinding.objects.create(
@@ -296,6 +325,8 @@ class SnapshotComparisonTests(TestCase):
         self.assertEqual(summary["index_experiment"]["after_mode"], "with_indexes")
         self.assertEqual(summary["index_experiment"]["changes"][0]["change"], "added")
         self.assertEqual(summary["queries"]["top_improvements"][0]["mean_exec_time"]["scale_max"], 80)
+        self.assertIn("SELECT", summary["queries"]["by_operation"])
+        self.assertEqual(summary["queries"]["read_totals"]["calls"]["before"], 200)
 
     def test_compare_snapshots_command_supports_json_output(self):
         out = []
@@ -597,6 +628,42 @@ class IndexExperimentCommandTests(TestCase):
         rendered = "".join(out)
         self.assertIn("Index experiment mode: unsupported", rendered)
 
+    def test_manage_experiment_indexes_status_reports_unsupported_mode_on_sqlite(self):
+        out = []
+
+        call_command("manage_experiment_indexes", "--status", stdout=Buffer(out))
+
+        rendered = "".join(out)
+        self.assertIn("Index experiment mode: unsupported", rendered)
+
+    def test_reset_pg_stats_requires_postgresql(self):
+        with self.assertRaisesMessage(Exception, "requires PostgreSQL"):
+            call_command("reset_pg_stats")
+
+    def test_vacuum_analyze_demo_tables_requires_postgresql(self):
+        with self.assertRaisesMessage(Exception, "requires PostgreSQL"):
+            call_command("vacuum_analyze_demo_tables", "--dry-run")
+
+    def test_capture_query_plans_requires_postgresql(self):
+        snapshot = StatsSnapshot.objects.create(
+            label="plans",
+            environment="test",
+            database_vendor="sqlite",
+            database_name="test",
+            status=StatsSnapshot.Status.SKIPPED,
+        )
+        with self.assertRaisesMessage(Exception, "requires PostgreSQL"):
+            call_command("capture_query_plans", snapshot_id=snapshot.id)
+
+
+class QueryClassificationTests(TestCase):
+    def test_classify_sql_operation_groups_common_statement_types(self):
+        self.assertEqual(classify_sql_operation("SELECT * FROM shop_product"), "SELECT")
+        self.assertEqual(classify_sql_operation("insert into shop_order values ($1)"), "INSERT")
+        self.assertEqual(classify_sql_operation(" UPDATE shop_product SET stock = stock + 1"), "UPDATE")
+        self.assertEqual(classify_sql_operation("delete from shop_review where id = $1"), "DELETE")
+        self.assertEqual(classify_sql_operation("BEGIN"), "OTHER")
+
 
 class IndexExperimentSelectionTests(TestCase):
     def test_recommend_experiment_indexes_selects_multiple_candidates_from_slowest_queries(self):
@@ -622,6 +689,20 @@ class IndexExperimentSelectionTests(TestCase):
                     min_exec_time=10,
                     max_exec_time=120,
                     rows=1000,
+                ),
+                QueryStatSnapshot(
+                    snapshot=snapshot,
+                    queryid="catalog-price",
+                    query_text_normalized=(
+                        "SELECT * FROM shop_product WHERE is_active = true "
+                        "ORDER BY price ASC, name ASC LIMIT 20"
+                    ),
+                    calls=70,
+                    total_exec_time=3000,
+                    mean_exec_time=42,
+                    min_exec_time=8,
+                    max_exec_time=130,
+                    rows=900,
                 ),
                 QueryStatSnapshot(
                     snapshot=snapshot,
@@ -668,15 +749,29 @@ class IndexExperimentSelectionTests(TestCase):
         selected = recommend_experiment_indexes(snapshot=snapshot, limit=5)
         names = [item["name"] for item in selected]
 
-        self.assertIn("shop_product_created_at_idx", names)
-        self.assertIn("shop_product_active_created_at_idx", names)
+        self.assertIn("shop_product_covering_catalog_idx", names)
+        self.assertIn("shop_product_active_price_covering_idx", names)
         self.assertIn("shop_product_name_trgm_idx", names)
         self.assertIn("shop_product_description_trgm_idx", names)
-        self.assertIn("shop_order_user_created_at_idx", names)
+        self.assertIn("shop_order_user_created_at_covering_idx", names)
 
     def test_recommend_experiment_indexes_falls_back_to_default_indexes_without_snapshot_data(self):
         selected = recommend_experiment_indexes(snapshot=None, limit=5)
         names = [item["name"] for item in selected]
 
-        self.assertIn("shop_product_created_at_idx", names)
+        self.assertIn("shop_product_covering_catalog_idx", names)
         self.assertIn("shop_product_name_trgm_idx", names)
+
+    def test_recommend_experiment_indexes_can_be_limited_to_group(self):
+        selected = recommend_experiment_indexes(snapshot=None, limit=5, groups=["order_history_covering"])
+        names = [item["name"] for item in selected]
+
+        self.assertEqual(names, ["shop_order_user_created_at_covering_idx"])
+
+    def test_configure_status_syncs_database_backed_index_catalog(self):
+        out = []
+
+        call_command("configure_index_experiment", "status", "--sync-catalog", stdout=Buffer(out))
+
+        self.assertTrue(ExperimentIndexGroup.objects.filter(name="catalog_covering").exists())
+        self.assertTrue(ExperimentIndexDefinition.objects.filter(name="shop_product_covering_catalog_idx").exists())

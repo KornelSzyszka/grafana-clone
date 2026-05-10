@@ -2,6 +2,8 @@ from django.db import DatabaseError, connection, transaction
 
 from db_monitor.models import ActivitySnapshot, IndexStatSnapshot, QueryStatSnapshot, StatsSnapshot, TableStatSnapshot
 from db_monitor.services.index_experiments import get_experiment_index_state
+from db_monitor.services.query_classification import classify_sql_operation
+from load_simulator.services.runs import link_latest_unattached_workload_run
 
 
 def _fetch_all(cursor, sql, params=None):
@@ -45,9 +47,22 @@ def collect_stats_snapshot(label="", environment="", query_limit=200, activity_l
 
     if connection.vendor != "postgresql":
         message = f"Statistics collection requires PostgreSQL; current backend is {connection.vendor}."
+        workload_run = link_latest_unattached_workload_run(snapshot)
         snapshot.status = StatsSnapshot.Status.SKIPPED
         snapshot.notes = message
-        snapshot.metadata_json = {"reason": "non_postgresql_backend"}
+        snapshot.metadata_json = {
+            "reason": "non_postgresql_backend",
+            "workload_run": {
+                "id": workload_run.id,
+                "scenario": workload_run.scenario,
+                "seed": workload_run.seed,
+                "operations": workload_run.operations,
+                "concurrency": workload_run.concurrency,
+                "mutates_data": workload_run.mutates_data,
+            }
+            if workload_run
+            else {},
+        }
         snapshot.save(update_fields=["status", "notes", "metadata_json"])
         notes.append(message)
         return snapshot, summary
@@ -92,8 +107,11 @@ def collect_stats_snapshot(label="", environment="", query_limit=200, activity_l
                     relname AS table_name,
                     seq_scan,
                     idx_scan,
+                    seq_tup_read,
+                    idx_tup_fetch,
                     n_live_tup,
                     n_dead_tup,
+                    pg_total_relation_size(relid) AS table_size_bytes,
                     vacuum_count,
                     autovacuum_count,
                     analyze_count,
@@ -116,6 +134,8 @@ def collect_stats_snapshot(label="", environment="", query_limit=200, activity_l
                     ui.relname AS table_name,
                     ui.indexrelname AS index_name,
                     ui.idx_scan,
+                    ui.idx_tup_read,
+                    ui.idx_tup_fetch,
                     pg_relation_size(ui.indexrelid) AS index_size_bytes
                 FROM pg_stat_user_indexes ui
                 ORDER BY ui.idx_scan ASC, pg_relation_size(ui.indexrelid) DESC
@@ -157,6 +177,7 @@ def collect_stats_snapshot(label="", environment="", query_limit=200, activity_l
                 snapshot=snapshot,
                 queryid=row.get("queryid") or "",
                 query_text_normalized=row.get("query") or "",
+                operation_type=classify_sql_operation(row.get("query") or ""),
                 calls=row.get("calls") or 0,
                 total_exec_time=row.get("total_exec_time") or 0,
                 mean_exec_time=row.get("mean_exec_time") or 0,
@@ -176,8 +197,11 @@ def collect_stats_snapshot(label="", environment="", query_limit=200, activity_l
                 table_name=row.get("table_name") or "",
                 seq_scan=row.get("seq_scan") or 0,
                 idx_scan=row.get("idx_scan") or 0,
+                seq_tup_read=row.get("seq_tup_read") or 0,
+                idx_tup_fetch=row.get("idx_tup_fetch") or 0,
                 n_live_tup=row.get("n_live_tup") or 0,
                 n_dead_tup=row.get("n_dead_tup") or 0,
+                table_size_bytes=row.get("table_size_bytes") or 0,
                 vacuum_count=row.get("vacuum_count") or 0,
                 autovacuum_count=row.get("autovacuum_count") or 0,
                 analyze_count=row.get("analyze_count") or 0,
@@ -195,6 +219,8 @@ def collect_stats_snapshot(label="", environment="", query_limit=200, activity_l
                 table_name=row.get("table_name") or "",
                 index_name=row.get("index_name") or "",
                 idx_scan=row.get("idx_scan") or 0,
+                idx_tup_read=row.get("idx_tup_read") or 0,
+                idx_tup_fetch=row.get("idx_tup_fetch") or 0,
                 index_size_bytes=row.get("index_size_bytes") or 0,
             )
             for row in index_rows
@@ -222,12 +248,23 @@ def collect_stats_snapshot(label="", environment="", query_limit=200, activity_l
     summary["index_stats"] = len(index_rows)
     summary["activities"] = len(activity_rows)
     experiment_state = get_experiment_index_state()
+    workload_run = link_latest_unattached_workload_run(snapshot)
     snapshot.notes = "\n".join(notes)
     snapshot.metadata_json = {
         "query_limit": query_limit,
         "activity_limit": activity_limit,
         "include_activity": include_activity,
         "index_experiment": experiment_state,
+        "workload_run": {
+            "id": workload_run.id,
+            "scenario": workload_run.scenario,
+            "seed": workload_run.seed,
+            "operations": workload_run.operations,
+            "concurrency": workload_run.concurrency,
+            "mutates_data": workload_run.mutates_data,
+        }
+        if workload_run
+        else {},
         "counts": {
             "query_stats": summary["query_stats"],
             "table_stats": summary["table_stats"],

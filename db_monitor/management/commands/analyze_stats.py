@@ -20,6 +20,8 @@ class Command(BaseCommand):
         parser.add_argument("--seq-scan-table-min", type=int)
         parser.add_argument("--seq-scan-live-rows-min", type=int)
         parser.add_argument("--seq-scan-ratio-min", type=float)
+        parser.add_argument("--covering-index-total-ms", type=float)
+        parser.add_argument("--covering-index-calls", type=int)
 
     def handle(self, *args, **options):
         snapshot = self._resolve_snapshot(options)
@@ -33,6 +35,8 @@ class Command(BaseCommand):
             "seq_scan_table_min": options["seq_scan_table_min"],
             "seq_scan_live_rows_min": options["seq_scan_live_rows_min"],
             "seq_scan_ratio_min": options["seq_scan_ratio_min"],
+            "covering_index_total_ms": options["covering_index_total_ms"],
+            "covering_index_calls": options["covering_index_calls"],
         }
         thresholds = {key: value for key, value in thresholds.items() if value is not None}
 

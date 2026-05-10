@@ -1,24 +1,40 @@
-from db_monitor.models import StatsSnapshot
+from django.db.utils import OperationalError, ProgrammingError
+
+from db_monitor.models import ExperimentIndexDefinition, ExperimentIndexGroup, StatsSnapshot
 from django.db import connection
 
 
+EXPERIMENT_GROUPS = ["catalog_covering", "order_history_covering", "search", "sales_report", "write_cost"]
+EXPERIMENT_GROUP_DESCRIPTIONS = {
+    "catalog_covering": "Covering indexes for product catalog listing flows.",
+    "order_history_covering": "Covering indexes for user order history flows.",
+    "search": "Indexes for text-heavy catalog search flows.",
+    "sales_report": "Indexes for reporting and aggregate windows.",
+    "write_cost": "Indexes included when measuring write-side maintenance overhead.",
+}
+
 INDEX_CANDIDATE_RULES = [
     {
-        "name": "shop_product_created_at_idx",
+        "name": "shop_product_covering_catalog_idx",
+        "groups": ["catalog_covering", "write_cost"],
         "table": "shop_product",
-        "columns": "created_at DESC",
-        "description": "Recent product filtering and newest-product sorting",
-        "match_all": ["shop_product", "created_at"],
-    },
-    {
-        "name": "shop_product_active_created_at_idx",
-        "table": "shop_product",
-        "columns": "is_active, created_at DESC",
-        "description": "Active catalog listing ordered by newest products",
+        "columns": "is_active, category_id, created_at DESC",
+        "include": "id, name, slug, price, stock, popularity_score",
+        "description": "Covering index for active product catalog filtering by category and newest sorting",
         "match_all": ["shop_product", "is_active", "created_at"],
     },
     {
+        "name": "shop_product_active_price_covering_idx",
+        "groups": ["catalog_covering", "write_cost"],
+        "table": "shop_product",
+        "columns": "is_active, category_id, price, name",
+        "include": "id, slug, stock, popularity_score",
+        "description": "Covering index for active product catalog filtering by category and price sorting",
+        "match_all": ["shop_product", "is_active", "price"],
+    },
+    {
         "name": "shop_product_name_trgm_idx",
+        "groups": ["search", "write_cost"],
         "table": "shop_product",
         "using": "USING gin",
         "columns": "name gin_trgm_ops",
@@ -28,6 +44,7 @@ INDEX_CANDIDATE_RULES = [
     },
     {
         "name": "shop_product_description_trgm_idx",
+        "groups": ["search", "write_cost"],
         "table": "shop_product",
         "using": "USING gin",
         "columns": "description gin_trgm_ops",
@@ -36,14 +53,17 @@ INDEX_CANDIDATE_RULES = [
         "match_all": ["shop_product", "ilike", "description"],
     },
     {
-        "name": "shop_order_user_created_at_idx",
+        "name": "shop_order_user_created_at_covering_idx",
+        "groups": ["order_history_covering", "write_cost"],
         "table": "shop_order",
         "columns": "user_id, created_at DESC",
-        "description": "Order history lookup by user sorted by newest orders",
+        "include": "id, status, total_amount",
+        "description": "Covering index for order history lookup by user sorted by newest orders",
         "match_all": ["shop_order", "user_id", "created_at"],
     },
     {
         "name": "shop_order_status_created_at_idx",
+        "groups": ["sales_report", "write_cost"],
         "table": "shop_order",
         "columns": "status, created_at DESC",
         "description": "Sales report filtering by order status and date window",
@@ -51,6 +71,7 @@ INDEX_CANDIDATE_RULES = [
     },
     {
         "name": "shop_review_product_created_at_idx",
+        "groups": ["catalog_covering", "write_cost"],
         "table": "shop_review",
         "columns": "product_id, created_at DESC",
         "description": "Recent product review lookup ordered by newest reviews",
@@ -59,7 +80,7 @@ INDEX_CANDIDATE_RULES = [
 ]
 
 DEFAULT_INDEX_NAMES = {
-    "shop_product_created_at_idx",
+    "shop_product_covering_catalog_idx",
     "shop_product_name_trgm_idx",
 }
 
@@ -70,9 +91,10 @@ def _normalize_query_text(text):
 
 def _index_sql(index_definition):
     using = f" {index_definition['using']}" if index_definition.get("using") else ""
+    include = f" INCLUDE ({index_definition['include']})" if index_definition.get("include") else ""
     return (
         f"CREATE INDEX {index_definition['name']} "
-        f"ON {index_definition['table']}{using} ({index_definition['columns']})"
+        f"ON {index_definition['table']}{using} ({index_definition['columns']}){include}"
     )
 
 
@@ -114,10 +136,87 @@ def _matches_rule(query_text, rule):
     return bool(query_text and all(token in query_text for token in match_all))
 
 
-def recommend_experiment_indexes(snapshot=None, limit=5):
+def _definition_to_rule(definition):
+    return {
+        "name": definition.name,
+        "groups": list(definition.groups.values_list("name", flat=True)),
+        "table": definition.table_name,
+        "using": definition.using,
+        "columns": definition.columns,
+        "include": definition.include,
+        "extensions": definition.extensions_json or [],
+        "description": definition.description,
+        "match_all": definition.match_all_json or [],
+        "is_default": definition.is_default,
+    }
+
+
+def sync_experiment_index_catalog():
+    groups_by_name = {}
+    for group_name in EXPERIMENT_GROUPS:
+        group, _ = ExperimentIndexGroup.objects.update_or_create(
+            name=group_name,
+            defaults={"description": EXPERIMENT_GROUP_DESCRIPTIONS.get(group_name, "")},
+        )
+        groups_by_name[group_name] = group
+
+    for rule in INDEX_CANDIDATE_RULES:
+        definition, _ = ExperimentIndexDefinition.objects.update_or_create(
+            name=rule["name"],
+            defaults={
+                "table_name": rule["table"],
+                "using": rule.get("using", ""),
+                "columns": rule["columns"],
+                "include": rule.get("include", ""),
+                "extensions_json": rule.get("extensions", []),
+                "description": rule["description"],
+                "match_all_json": rule.get("match_all", []),
+                "is_default": rule["name"] in DEFAULT_INDEX_NAMES,
+            },
+        )
+        definition.groups.set(groups_by_name[group] for group in rule.get("groups", []) if group in groups_by_name)
+
+
+def _catalog_rules():
+    try:
+        if ExperimentIndexDefinition.objects.exists():
+            return [
+                _definition_to_rule(definition)
+                for definition in ExperimentIndexDefinition.objects.prefetch_related("groups").all()
+            ]
+        sync_experiment_index_catalog()
+        return [
+            _definition_to_rule(definition)
+            for definition in ExperimentIndexDefinition.objects.prefetch_related("groups").all()
+        ]
+    except (OperationalError, ProgrammingError):
+        return list(INDEX_CANDIDATE_RULES)
+
+
+def _normalize_groups(groups=None):
+    if not groups:
+        return []
+    normalized = []
+    for group in groups:
+        if group not in EXPERIMENT_GROUPS:
+            raise ValueError(f"Unknown experiment index group: {group}")
+        normalized.append(group)
+    return normalized
+
+
+def _filter_by_groups(definitions, groups=None):
+    normalized_groups = _normalize_groups(groups)
+    if not normalized_groups:
+        return list(definitions)
+    selected_groups = set(normalized_groups)
+    return [definition for definition in definitions if selected_groups.intersection(definition.get("groups", []))]
+
+
+def recommend_experiment_indexes(snapshot=None, limit=5, groups=None):
+    candidate_rules = _filter_by_groups(_catalog_rules(), groups=groups)
     resolved_snapshot = _resolve_snapshot(snapshot)
     if not resolved_snapshot:
-        return [rule for rule in INDEX_CANDIDATE_RULES if rule["name"] in DEFAULT_INDEX_NAMES][:limit]
+        return [rule for rule in candidate_rules if rule["name"] in DEFAULT_INDEX_NAMES][:limit] or candidate_rules[:limit]
 
     selected = []
     selected_names = set()
@@ -129,7 +228,7 @@ def recommend_experiment_indexes(snapshot=None, limit=5):
 
     for row in query_rows:
         normalized_query = _normalize_query_text(row.query_text_normalized)
-        for rule in INDEX_CANDIDATE_RULES:
+        for rule in candidate_rules:
             if rule["name"] in selected_names:
                 continue
             if not _matches_rule(normalized_query, rule):
@@ -148,15 +247,15 @@ def recommend_experiment_indexes(snapshot=None, limit=5):
                 return selected
 
     if not selected:
-        return [rule for rule in INDEX_CANDIDATE_RULES if rule["name"] in DEFAULT_INDEX_NAMES][:limit]
+        return [rule for rule in candidate_rules if rule["name"] in DEFAULT_INDEX_NAMES][:limit] or candidate_rules[:limit]
 
     return selected
 
 
-def _managed_index_definitions(snapshot=None, limit=5):
-    selected = recommend_experiment_indexes(snapshot=snapshot, limit=limit)
+def _managed_index_definitions(snapshot=None, limit=5, groups=None):
+    selected = recommend_experiment_indexes(snapshot=snapshot, limit=limit, groups=groups)
     selected_names = {item["name"] for item in selected}
-    remaining = [rule for rule in INDEX_CANDIDATE_RULES if rule["name"] not in selected_names]
+    remaining = [rule for rule in _filter_by_groups(_catalog_rules(), groups=groups) if rule["name"] not in selected_names]
     return selected + remaining
 
 
@@ -168,7 +267,9 @@ def _collect_index_state(cursor, definitions):
                 "name": definition["name"],
                 "table": definition["table"],
                 "columns": definition["columns"],
+                "include": definition.get("include", ""),
                 "description": definition["description"],
+                "groups": definition.get("groups", []),
                 "source_query": definition.get("source_query", ""),
                 "source_total_exec_time": definition.get("source_total_exec_time", 0),
                 "present": _index_exists(cursor, definition["name"]),
@@ -177,7 +278,7 @@ def _collect_index_state(cursor, definitions):
     return state
 
 
-def get_experiment_index_state(snapshot=None, limit=5):
+def get_experiment_index_state(snapshot=None, limit=5, groups=None):
     if connection.vendor != "postgresql":
         return {
             "database_vendor": connection.vendor,
@@ -187,7 +288,7 @@ def get_experiment_index_state(snapshot=None, limit=5):
             "selection_strategy": "top longest-running queries from before snapshot",
         }
 
-    definitions = _managed_index_definitions(snapshot=snapshot, limit=limit)
+    definitions = _managed_index_definitions(snapshot=snapshot, limit=limit, groups=groups)
     with connection.cursor() as cursor:
         state = _collect_index_state(cursor, definitions)
 
@@ -196,11 +297,12 @@ def get_experiment_index_state(snapshot=None, limit=5):
         "mode": "with_indexes" if any(item["present"] for item in state) else "without_indexes",
         "indexes": state,
         "notes": [],
+        "groups": _normalize_groups(groups),
         "selection_strategy": "top longest-running queries from before snapshot",
     }
 
 
-def configure_experiment_indexes(mode, snapshot=None, limit=5):
+def configure_experiment_indexes(mode, snapshot=None, limit=5, concurrently=False, groups=None):
     if mode not in {"with_indexes", "without_indexes"}:
         raise ValueError("Mode must be either `with_indexes` or `without_indexes`.")
 
@@ -209,9 +311,9 @@ def configure_experiment_indexes(mode, snapshot=None, limit=5):
 
     notes = []
     changed = []
-    selected_definitions = recommend_experiment_indexes(snapshot=snapshot, limit=limit)
+    selected_definitions = recommend_experiment_indexes(snapshot=snapshot, limit=limit, groups=groups)
     selected_names = {definition["name"] for definition in selected_definitions}
-    all_definitions = _managed_index_definitions(snapshot=snapshot, limit=limit)
+    all_definitions = _managed_index_definitions(snapshot=snapshot, limit=limit, groups=groups)
 
     with connection.cursor() as cursor:
         for definition in all_definitions:
@@ -234,12 +336,16 @@ def configure_experiment_indexes(mode, snapshot=None, limit=5):
                     notes.append(f"Index {definition['name']} already present.")
                     continue
 
-                cursor.execute(_index_sql(definition))
+                sql = _index_sql(definition)
+                if concurrently:
+                    sql = sql.replace("CREATE INDEX", "CREATE INDEX CONCURRENTLY", 1)
+                cursor.execute(sql)
                 changed.append({"name": definition["name"], "action": "created"})
             else:
                 if not _index_exists(cursor, definition["name"]):
                     continue
-                cursor.execute(f"DROP INDEX {definition['name']}")
+                concurrently_sql = " CONCURRENTLY" if concurrently else ""
+                cursor.execute(f"DROP INDEX{concurrently_sql} {definition['name']}")
                 changed.append({"name": definition["name"], "action": "dropped"})
 
         state = _collect_index_state(cursor, all_definitions)
@@ -250,6 +356,8 @@ def configure_experiment_indexes(mode, snapshot=None, limit=5):
         "indexes": state,
         "changed": changed,
         "notes": notes,
+        "groups": _normalize_groups(groups),
         "selection_strategy": "top longest-running queries from before snapshot",
         "selected_indexes": [item for item in state if item["name"] in selected_names],
+        "concurrently": concurrently,
     }

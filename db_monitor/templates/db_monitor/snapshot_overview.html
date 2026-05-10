@@ -22,6 +22,7 @@
         <div class="metric-card"><div class="label">Findings</div><div class="value">{{ summary.counts.findings }}</div></div>
         <div class="metric-card"><div class="label">Queries</div><div class="value">{{ summary.counts.queries }}</div></div>
         <div class="metric-card"><div class="label">Activities</div><div class="value">{{ summary.counts.activities }}</div></div>
+        <div class="metric-card"><div class="label">Query Plans</div><div class="value">{{ summary.counts.query_plans }}</div><div class="subvalue">{{ summary.query_plans.index_only_count }} index-only</div></div>
     </div>
 
     <div class="section-tabs">
@@ -90,5 +91,21 @@
             <div class="panel-body"><ul class="summary-list">{% for table in tables.problematic %}<li><strong>{{ table.table }}</strong><br><span class="muted">Seq scans {{ table.seq_scan }} | Seq/idx ratio {{ table.seq_to_idx_ratio|floatformat:2 }}</span></li>{% empty %}<li>No table stats available.</li>{% endfor %}</ul></div>
         </section>
     </div>
+
+    {% if query_plans.all %}
+    <section class="panel" style="margin-top: 18px;">
+        <div class="panel-header"><h3>Representative EXPLAIN plans</h3></div>
+        <div class="panel-body">
+            <table class="main-table">
+                <thead><tr><th>Name</th><th>Execution ms</th><th>Planning ms</th><th>Total cost</th><th>Index-only</th><th>Seq scan</th></tr></thead>
+                <tbody>
+                    {% for plan in query_plans.all %}
+                    <tr><td><strong>{{ plan.name }}</strong><br><span class="muted">{{ plan.description }}</span></td><td>{{ plan.execution_time_ms|floatformat:2 }}</td><td>{{ plan.planning_time_ms|floatformat:2 }}</td><td>{{ plan.total_cost|floatformat:2 }}</td><td>{{ plan.uses_index_only_scan }}</td><td>{{ plan.uses_seq_scan }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% endif %}
 </div>
 {% endblock %}

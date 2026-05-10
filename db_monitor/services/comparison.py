@@ -1,6 +1,7 @@
 from collections import Counter
 
 from db_monitor.models import StatsSnapshot
+from db_monitor.services.query_classification import classify_sql_operation, is_read_operation, is_write_operation
 
 
 def _truncate(text, limit=120):
@@ -89,6 +90,13 @@ def _query_key(query_stat):
     return "text:"
 
 
+def _row_operation(row):
+    operation = getattr(row, "operation_type", "") or ""
+    if not operation or operation == "UNKNOWN":
+        return classify_sql_operation(row.query_text_normalized)
+    return operation
+
+
 def _finding_key(finding):
     return finding.type, finding.object_name or finding.title
 
@@ -104,9 +112,13 @@ def _query_entry(before_stat, after_stat):
         preview_source = after_stat.query_text_normalized or preview_source
 
     display_name = _truncate(preview_source, limit=90) or queryid or "Query without fingerprint"
+    operation_type = getattr(after_stat, "operation_type", "") or getattr(before_stat, "operation_type", "")
+    if not operation_type or operation_type == "UNKNOWN":
+        operation_type = classify_sql_operation(preview_source)
 
     return {
         "queryid": queryid,
+        "operation_type": operation_type,
         "query_preview": _truncate(preview_source, limit=160),
         "query_label": display_name,
         "calls": _metric_block(getattr(before_stat, "calls", 0), getattr(after_stat, "calls", 0)),
@@ -180,6 +192,8 @@ def _table_entry(before_stat, after_stat):
         "table": f"{schema_name}.{table_name}",
         "seq_scan": _metric_block(getattr(before_stat, "seq_scan", 0), getattr(after_stat, "seq_scan", 0)),
         "idx_scan": _metric_block(getattr(before_stat, "idx_scan", 0), getattr(after_stat, "idx_scan", 0)),
+        "seq_tup_read": _metric_block(getattr(before_stat, "seq_tup_read", 0), getattr(after_stat, "seq_tup_read", 0)),
+        "idx_tup_fetch": _metric_block(getattr(before_stat, "idx_tup_fetch", 0), getattr(after_stat, "idx_tup_fetch", 0)),
         "n_live_tup": _metric_block(
             getattr(before_stat, "n_live_tup", 0),
             getattr(after_stat, "n_live_tup", 0),
@@ -187,6 +201,10 @@ def _table_entry(before_stat, after_stat):
         "n_dead_tup": _metric_block(
             getattr(before_stat, "n_dead_tup", 0),
             getattr(after_stat, "n_dead_tup", 0),
+        ),
+        "table_size_bytes": _metric_block(
+            getattr(before_stat, "table_size_bytes", 0),
+            getattr(after_stat, "table_size_bytes", 0),
         ),
     }
 
@@ -203,6 +221,8 @@ def _index_entry(before_stat, after_stat):
         "index": f"{schema_name}.{index_name}",
         "table": f"{schema_name}.{table_name}",
         "idx_scan": _metric_block(getattr(before_stat, "idx_scan", 0), getattr(after_stat, "idx_scan", 0)),
+        "idx_tup_read": _metric_block(getattr(before_stat, "idx_tup_read", 0), getattr(after_stat, "idx_tup_read", 0)),
+        "idx_tup_fetch": _metric_block(getattr(before_stat, "idx_tup_fetch", 0), getattr(after_stat, "idx_tup_fetch", 0)),
         "index_size_bytes": _metric_block(
             getattr(before_stat, "index_size_bytes", 0),
             getattr(after_stat, "index_size_bytes", 0),
@@ -287,6 +307,36 @@ def _summarize_queries(snapshot_a, snapshot_b, top):
         if len(merged_improvements) >= top:
             break
 
+    operation_totals = {}
+    for operation in sorted({entry["operation_type"] for entry in entries} | {"SELECT", "INSERT", "UPDATE", "DELETE"}):
+        before_rows = [row for row in before_map.values() if _row_operation(row) == operation]
+        after_rows = [row for row in after_map.values() if _row_operation(row) == operation]
+        operation_totals[operation] = {
+            "calls": _metric_block(sum(row.calls for row in before_rows), sum(row.calls for row in after_rows)),
+            "total_exec_time": _metric_block(
+                sum(row.total_exec_time for row in before_rows),
+                sum(row.total_exec_time for row in after_rows),
+            ),
+            "rows": _metric_block(sum(row.rows for row in before_rows), sum(row.rows for row in after_rows)),
+        }
+
+    read_before = [row for row in before_map.values() if is_read_operation(_row_operation(row))]
+    read_after = [row for row in after_map.values() if is_read_operation(_row_operation(row))]
+    write_before = [row for row in before_map.values() if is_write_operation(_row_operation(row))]
+    write_after = [row for row in after_map.values() if is_write_operation(_row_operation(row))]
+
+    top_by_operation = {}
+    for operation in ["SELECT", "INSERT", "UPDATE", "DELETE"]:
+        top_by_operation[operation] = sorted(
+            [entry for entry in entries if entry["operation_type"] == operation],
+            key=lambda item: (
+                item["total_exec_time"]["after"],
+                item["calls"]["after"],
+                item["mean_exec_time"]["after"],
+            ),
+            reverse=True,
+        )[:top]
+
     return {
         "totals": {
             "before": {
@@ -300,6 +350,22 @@ def _summarize_queries(snapshot_a, snapshot_b, top):
                 "rows": sum(row.rows for row in after_map.values()),
             },
         },
+        "read_totals": {
+            "calls": _metric_block(sum(row.calls for row in read_before), sum(row.calls for row in read_after)),
+            "total_exec_time": _metric_block(
+                sum(row.total_exec_time for row in read_before),
+                sum(row.total_exec_time for row in read_after),
+            ),
+        },
+        "write_totals": {
+            "calls": _metric_block(sum(row.calls for row in write_before), sum(row.calls for row in write_after)),
+            "total_exec_time": _metric_block(
+                sum(row.total_exec_time for row in write_before),
+                sum(row.total_exec_time for row in write_after),
+            ),
+        },
+        "by_operation": operation_totals,
+        "top_by_operation": top_by_operation,
         "counts": {
             "before": len(before_map),
             "after": len(after_map),
@@ -321,14 +387,20 @@ def _summarize_tables(snapshot_a, snapshot_b, top):
             "before": {
                 "seq_scan": sum(row.seq_scan for row in before_map.values()),
                 "idx_scan": sum(row.idx_scan for row in before_map.values()),
+                "seq_tup_read": sum(row.seq_tup_read for row in before_map.values()),
+                "idx_tup_fetch": sum(row.idx_tup_fetch for row in before_map.values()),
                 "n_live_tup": sum(row.n_live_tup for row in before_map.values()),
                 "n_dead_tup": sum(row.n_dead_tup for row in before_map.values()),
+                "table_size_bytes": sum(row.table_size_bytes for row in before_map.values()),
             },
             "after": {
                 "seq_scan": sum(row.seq_scan for row in after_map.values()),
                 "idx_scan": sum(row.idx_scan for row in after_map.values()),
+                "seq_tup_read": sum(row.seq_tup_read for row in after_map.values()),
+                "idx_tup_fetch": sum(row.idx_tup_fetch for row in after_map.values()),
                 "n_live_tup": sum(row.n_live_tup for row in after_map.values()),
                 "n_dead_tup": sum(row.n_dead_tup for row in after_map.values()),
+                "table_size_bytes": sum(row.table_size_bytes for row in after_map.values()),
             },
         },
         "counts": {
@@ -349,10 +421,14 @@ def _summarize_indexes(snapshot_a, snapshot_b, top):
         "totals": {
             "before": {
                 "idx_scan": sum(row.idx_scan for row in before_map.values()),
+                "idx_tup_read": sum(row.idx_tup_read for row in before_map.values()),
+                "idx_tup_fetch": sum(row.idx_tup_fetch for row in before_map.values()),
                 "index_size_bytes": sum(row.index_size_bytes for row in before_map.values()),
             },
             "after": {
                 "idx_scan": sum(row.idx_scan for row in after_map.values()),
+                "idx_tup_read": sum(row.idx_tup_read for row in after_map.values()),
+                "idx_tup_fetch": sum(row.idx_tup_fetch for row in after_map.values()),
                 "index_size_bytes": sum(row.index_size_bytes for row in after_map.values()),
             },
         },

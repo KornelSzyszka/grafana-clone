@@ -26,12 +26,12 @@
             <div class="panel-header"><h2>Top slow queries</h2></div>
             <div class="panel-body">
                 <table class="main-table">
-                    <thead><tr><th>Query</th><th>Mean ms</th><th>Max ms</th><th>Total ms</th><th>Calls</th></tr></thead>
+                    <thead><tr><th>Query</th><th>Op</th><th>Mean ms</th><th>Max ms</th><th>Total ms</th><th>Calls</th></tr></thead>
                     <tbody>
                         {% for query in queries.slowest %}
-                        <tr><td><strong>{{ query.label }}</strong><br><span class="muted">{{ query.preview }}</span>{% if query.queryid %}<br><span class="muted">Fingerprint {{ query.queryid }}</span>{% endif %}</td><td>{{ query.mean_exec_time|floatformat:2 }}</td><td>{{ query.max_exec_time|floatformat:2 }}</td><td>{{ query.total_exec_time|floatformat:2 }}</td><td>{{ query.calls }}</td></tr>
+                        <tr><td><strong>{{ query.label }}</strong><br><span class="muted">{{ query.preview }}</span>{% if query.queryid %}<br><span class="muted">Fingerprint {{ query.queryid }}</span>{% endif %}</td><td>{{ query.operation_type }}</td><td>{{ query.mean_exec_time|floatformat:2 }}</td><td>{{ query.max_exec_time|floatformat:2 }}</td><td>{{ query.total_exec_time|floatformat:2 }}</td><td>{{ query.calls }}</td></tr>
                         {% empty %}
-                        <tr><td colspan="5">No query stats available.</td></tr>
+                        <tr><td colspan="6">No query stats available.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -42,12 +42,12 @@
             <div class="panel-header"><h2>Top hot queries</h2></div>
             <div class="panel-body">
                 <table class="main-table">
-                    <thead><tr><th>Query</th><th>Total ms</th><th>Mean ms</th><th>Calls</th><th>Rows</th></tr></thead>
+                    <thead><tr><th>Query</th><th>Op</th><th>Total ms</th><th>Mean ms</th><th>Calls</th><th>Rows</th></tr></thead>
                     <tbody>
                         {% for query in queries.hottest %}
-                        <tr><td><strong>{{ query.label }}</strong><br><span class="muted">{{ query.preview }}</span>{% if query.queryid %}<br><span class="muted">Fingerprint {{ query.queryid }}</span>{% endif %}</td><td>{{ query.total_exec_time|floatformat:2 }}</td><td>{{ query.mean_exec_time|floatformat:2 }}</td><td>{{ query.calls }}</td><td>{{ query.rows }}</td></tr>
+                        <tr><td><strong>{{ query.label }}</strong><br><span class="muted">{{ query.preview }}</span>{% if query.queryid %}<br><span class="muted">Fingerprint {{ query.queryid }}</span>{% endif %}</td><td>{{ query.operation_type }}</td><td>{{ query.total_exec_time|floatformat:2 }}</td><td>{{ query.mean_exec_time|floatformat:2 }}</td><td>{{ query.calls }}</td><td>{{ query.rows }}</td></tr>
                         {% empty %}
-                        <tr><td colspan="5">No query stats available.</td></tr>
+                        <tr><td colspan="6">No query stats available.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -63,6 +63,25 @@
             </div>
         </section>
     </div>
+    <section class="panel" style="margin-top: 18px;">
+        <div class="panel-header"><h2>Top queries by SQL operation</h2></div>
+        <div class="panel-body">
+            <div class="split-grid">
+                {% for operation, rows in queries.by_operation.items %}
+                <div>
+                    <h3>{{ operation }}</h3>
+                    <ul class="summary-list">
+                        {% for query in rows %}
+                        <li><strong>{{ query.label }}</strong><br><span class="muted">{{ query.total_exec_time|floatformat:2 }} ms | {{ query.calls }} calls | mean {{ query.mean_exec_time|floatformat:2 }} ms</span></li>
+                        {% empty %}
+                        <li>No {{ operation }} queries recorded.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
     {% elif active_section == "tables" %}
     <section class="panel">
         <div class="panel-header"><h2>Problematic table ranking</h2></div>

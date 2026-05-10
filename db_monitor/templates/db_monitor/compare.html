@@ -36,6 +36,7 @@
     <div class="metrics-grid">
         <div class="metric-card"><div class="label">Findings Delta</div><div class="value">{{ summary.findings.totals.delta }}</div><div class="subvalue">{{ summary.findings.totals.before }} to {{ summary.findings.totals.after }}</div></div>
         <div class="metric-card"><div class="label">After Query Exec</div><div class="value">{{ summary.queries.totals.after.total_exec_time|floatformat:2 }}</div><div class="subvalue">total ms</div></div>
+        <div class="metric-card"><div class="label">Write Exec Delta</div><div class="value">{{ summary.queries.write_totals.total_exec_time.delta|floatformat:2 }}</div><div class="subvalue">INSERT/UPDATE/DELETE ms</div></div>
         <div class="metric-card"><div class="label">After Seq Scans</div><div class="value">{{ summary.tables.totals.after.seq_scan }}</div><div class="subvalue">table scan count</div></div>
         <div class="metric-card"><div class="label">After Index Usage</div><div class="value">{{ summary.indexes.totals.after.idx_scan }}</div><div class="subvalue">idx scan count</div></div>
     </div>
@@ -133,6 +134,33 @@
             </div>
         </section>
     </div>
+
+    <section class="panel" style="margin-top: 18px;">
+        <div class="panel-header"><h2>Read and write workload cost</h2></div>
+        <div class="panel-body">
+            <div class="key-value">
+                <div><span class="label">Read total ms</span><strong>{{ summary.queries.read_totals.total_exec_time.before|floatformat:2 }} -> {{ summary.queries.read_totals.total_exec_time.after|floatformat:2 }}</strong></div>
+                <div><span class="label">Write total ms</span><strong>{{ summary.queries.write_totals.total_exec_time.before|floatformat:2 }} -> {{ summary.queries.write_totals.total_exec_time.after|floatformat:2 }}</strong></div>
+                {% for operation, metrics in summary.queries.by_operation.items %}
+                <div><span class="label">{{ operation }} total ms</span><strong>{{ metrics.total_exec_time.before|floatformat:2 }} -> {{ metrics.total_exec_time.after|floatformat:2 }}</strong></div>
+                {% endfor %}
+            </div>
+            <div class="split-grid" style="margin-top: 16px;">
+                {% for operation, rows in summary.queries.top_by_operation.items %}
+                <div>
+                    <h3>{{ operation }}</h3>
+                    <ul class="summary-list">
+                        {% for entry in rows %}
+                        <li><strong>{{ entry.query_label }}</strong><br><span class="muted">after {{ entry.total_exec_time.after|floatformat:2 }} ms | calls {{ entry.calls.after }}</span></li>
+                        {% empty %}
+                        <li>No {{ operation }} queries.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
 
     <div class="split-grid" style="margin-top: 18px;">
         <section class="panel"><div class="panel-header"><h2>Table scan deltas</h2></div><div class="panel-body"><ul class="summary-list">{% for entry in summary.tables.top_seq_scan_increases %}<li><strong>{{ entry.table }}</strong><br><span class="muted">Seq delta {{ entry.seq_scan.delta }} | Idx delta {{ entry.idx_scan.delta }}</span></li>{% empty %}<li>No table increases detected.</li>{% endfor %}</ul></div></section>

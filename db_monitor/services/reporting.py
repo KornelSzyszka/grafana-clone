@@ -6,11 +6,13 @@ from db_monitor.models import (
     ActivitySnapshot,
     AnalysisFinding,
     IndexStatSnapshot,
+    QueryPlanSnapshot,
     QueryStatSnapshot,
     StatsSnapshot,
     TableStatSnapshot,
 )
 from db_monitor.services.comparison import compare_snapshots
+from db_monitor.services.query_classification import classify_sql_operation, is_write_operation
 
 
 def _normalize_query(text, limit=160):
@@ -227,6 +229,7 @@ def _snapshot_queryset():
         Prefetch("index_stats", queryset=IndexStatSnapshot.objects.order_by("idx_scan", "-index_size_bytes")),
         Prefetch("activities", queryset=ActivitySnapshot.objects.order_by("-duration_ms", "pid")),
         Prefetch("findings", queryset=AnalysisFinding.objects.order_by("severity", "-id")),
+        Prefetch("query_plans", queryset=QueryPlanSnapshot.objects.order_by("name")),
     )
 
 
@@ -235,6 +238,7 @@ def _query_rankings(snapshot, limit):
     ranked = [
         {
             "queryid": row.queryid,
+            "operation_type": row.operation_type if row.operation_type != "UNKNOWN" else classify_sql_operation(row.query_text_normalized),
             "label": _query_label(row.query_text_normalized, row.queryid),
             "preview": _normalize_query(row.query_text_normalized),
             "calls": row.calls,
@@ -255,9 +259,18 @@ def _query_rankings(snapshot, limit):
         key=lambda row: (row["total_exec_time"], row["calls"], row["mean_exec_time"]),
         reverse=True,
     )[:limit]
+    by_operation = {}
+    for operation in ["SELECT", "INSERT", "UPDATE", "DELETE"]:
+        by_operation[operation] = sorted(
+            [row for row in ranked if row["operation_type"] == operation],
+            key=lambda row: (row["total_exec_time"], row["calls"], row["mean_exec_time"]),
+            reverse=True,
+        )[:limit]
     return {
         "slowest": slowest,
         "hottest": hottest,
+        "by_operation": by_operation,
+        "write_total_exec_time": sum(row["total_exec_time"] for row in ranked if is_write_operation(row["operation_type"])),
         "all": ranked,
         "charts": {
             "hot_exec_time": _chart_rows(
@@ -265,7 +278,7 @@ def _query_rankings(snapshot, limit):
                     {
                         "label": row["label"],
                         "total_exec_time": row["total_exec_time"],
-                        "meta": f"{row['calls']} calls | mean {row['mean_exec_time']:.2f} ms",
+                        "meta": f"{row['operation_type']} | {row['calls']} calls | mean {row['mean_exec_time']:.2f} ms",
                     }
                     for row in hottest
                 ],
@@ -297,8 +310,11 @@ def _table_rankings(snapshot, limit):
                 "label": f"{row.table_name} ({row.schema_name})",
                 "seq_scan": row.seq_scan,
                 "idx_scan": row.idx_scan,
+                "seq_tup_read": row.seq_tup_read,
+                "idx_tup_fetch": row.idx_tup_fetch,
                 "n_live_tup": row.n_live_tup,
                 "n_dead_tup": row.n_dead_tup,
+                "table_size_bytes": row.table_size_bytes,
                 "seq_to_idx_ratio": seq_ratio,
             }
         )
@@ -426,12 +442,36 @@ def _finding_rankings(snapshot, limit):
     }
 
 
+def _query_plan_rankings(snapshot):
+    plans = list(snapshot.query_plans.all())
+    return {
+        "all": [
+            {
+                "name": plan.name,
+                "description": plan.description,
+                "execution_time_ms": plan.execution_time_ms,
+                "planning_time_ms": plan.planning_time_ms,
+                "total_cost": plan.total_cost,
+                "plan_rows": plan.plan_rows,
+                "uses_index_only_scan": plan.uses_index_only_scan,
+                "uses_index_scan": plan.uses_index_scan,
+                "uses_seq_scan": plan.uses_seq_scan,
+            }
+            for plan in plans
+        ],
+        "count": len(plans),
+        "index_only_count": sum(1 for plan in plans if plan.uses_index_only_scan),
+        "seq_scan_count": sum(1 for plan in plans if plan.uses_seq_scan),
+    }
+
+
 def _snapshot_summary(snapshot):
     findings = list(snapshot.findings.all())
     query_stats = list(snapshot.query_stats.all())
     table_stats = list(snapshot.table_stats.all())
     index_stats = list(snapshot.index_stats.all())
     activities = list(snapshot.activities.all())
+    query_plans = _query_plan_rankings(snapshot)
     metadata_counts = (snapshot.metadata_json or {}).get("counts", {})
     query_rankings = _query_rankings(snapshot, 5)
     table_rankings = _table_rankings(snapshot, 5)
@@ -445,12 +485,15 @@ def _snapshot_summary(snapshot):
             "indexes": metadata_counts.get("index_stats", len(index_stats)),
             "activities": metadata_counts.get("activities", len(activities)),
             "findings": len(findings),
+            "query_plans": query_plans["count"],
         },
         "metrics": {
             "total_calls": sum(row.calls for row in query_stats),
             "total_exec_time": sum(row.total_exec_time for row in query_stats),
+            "write_exec_time": query_rankings["write_total_exec_time"],
             "total_seq_scans": sum(row.seq_scan for row in table_stats),
             "total_idx_scans": sum(row.idx_scan for row in table_stats),
+            "total_table_size_bytes": sum(row.table_size_bytes for row in table_stats),
         },
         "severity_counts": finding_rankings["by_severity"],
         "top_slow_queries": query_rankings["slowest"],
@@ -459,6 +502,7 @@ def _snapshot_summary(snapshot):
         "underused_indexes": _index_rankings(snapshot, 5)["underused"],
         "longest_activities": _activity_rankings(snapshot, 5)["longest"],
         "top_findings": finding_rankings["top"],
+        "query_plans": query_plans,
         "charts": {
             "hot_queries": query_rankings["charts"]["hot_exec_time"],
             "slow_queries": query_rankings["charts"]["slow_mean_time"],
@@ -492,6 +536,11 @@ def get_dashboard_overview(limit=5):
                         "after": summary["queries"]["totals"]["after"]["calls"],
                     },
                     {
+                        "label": "Write exec time",
+                        "before": summary["queries"]["write_totals"]["total_exec_time"]["before"],
+                        "after": summary["queries"]["write_totals"]["total_exec_time"]["after"],
+                    },
+                    {
                         "label": "Seq scans",
                         "before": summary["tables"]["totals"]["before"]["seq_scan"],
                         "after": summary["tables"]["totals"]["after"]["seq_scan"],
@@ -521,6 +570,7 @@ def get_snapshot_report(snapshot_id, ranking_limit=10):
     indexes = _index_rankings(snapshot, ranking_limit)
     activities = _activity_rankings(snapshot, ranking_limit)
     findings = _finding_rankings(snapshot, ranking_limit)
+    query_plans = _query_plan_rankings(snapshot)
     return {
         "snapshot": snapshot,
         "summary": _snapshot_summary(snapshot),
@@ -529,6 +579,7 @@ def get_snapshot_report(snapshot_id, ranking_limit=10):
         "indexes": indexes,
         "activities": activities,
         "findings": findings,
+        "query_plans": query_plans,
     }
 
 
@@ -553,6 +604,11 @@ def get_comparison_report(snapshot_a_id, snapshot_b_id, top=10):
                     "label": "Query calls",
                     "before": summary["queries"]["totals"]["before"]["calls"],
                     "after": summary["queries"]["totals"]["after"]["calls"],
+                },
+                {
+                    "label": "Write exec time",
+                    "before": summary["queries"]["write_totals"]["total_exec_time"]["before"],
+                    "after": summary["queries"]["write_totals"]["total_exec_time"]["after"],
                 },
                 {
                     "label": "Seq scans",
