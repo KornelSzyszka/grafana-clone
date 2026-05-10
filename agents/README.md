@@ -19,14 +19,15 @@ The repository now contains:
 * the `shop` application with core domain models and JSON endpoints,
 * the `load_simulator` application with seeding and workload commands,
 * the `db_monitor` application with snapshot models, collection, heuristic findings, and snapshot comparison,
+* classic reporting views in `db_monitor` for dashboards, rankings, and before/after comparisons,
 * Docker files for PostgreSQL baseline setup,
 * controlled performance issues implemented in code for later experiments,
 * local environment examples and Python requirements,
 * PostgreSQL as the intended runtime path for the next stages,
-* no dashboard/reporting UI layer yet.
+* live PostgreSQL runtime validation completed on a reachable local PostgreSQL runtime.
 
 ## Suggested Usage
 
 1. Read `done/` to understand what already exists in code.
-2. Continue with `todo/` starting from PostgreSQL runtime validation and reporting work.
-3. When a work area is implemented, move its final implementation state into `done/`.
+2. Treat `todo/` as empty until new follow-up work is defined.
+3. When a new work area is implemented, add it to `todo/` and move its final implementation state into `done/`.

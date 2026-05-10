@@ -70,3 +70,24 @@ Controlled issues are enabled by default through:
 `ENABLE_CONTROLLED_PERFORMANCE_ISSUES=true`
 
 This can later be turned off when running the "after fix" side of the experiment.
+
+## Index Experiment Flow
+
+If the goal of the comparison is specifically:
+
+* `before` = workload without the optimization index,
+* `after` = workload with the optimization index,
+
+use the dedicated command:
+
+* `python manage.py configure_index_experiment without_indexes`
+* run workload and collect snapshot `before`
+* `python manage.py configure_index_experiment with_indexes`
+* run workload and collect snapshot `after`
+
+The command currently manages the experimental PostgreSQL indexes for:
+
+* `shop_product.created_at` as the main before/after indexing experiment,
+* `shop_product.name` trigram search index when `pg_trgm` is available.
+
+Collected snapshots store the active index-experiment state in their metadata so the reporting layer can verify whether a comparison really represents `without indexes -> with indexes`.

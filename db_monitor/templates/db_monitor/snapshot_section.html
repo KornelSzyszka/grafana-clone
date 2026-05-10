@@ -1,0 +1,162 @@
+{% extends "db_monitor/base.html" %}
+
+{% block title %}Snapshot {{ snapshot.id }} {{ active_section }}{% endblock %}
+
+{% block content %}
+<div class="monitor-shell">
+    <div class="monitor-hero">
+        <div class="monitor-title">
+            <h1>Snapshot #{{ snapshot.id }} {{ active_section }}</h1>
+            <p>{{ snapshot.label|default:"No label" }} | {{ snapshot.created_at }}</p>
+        </div>
+        <a class="button-link" href="{% url 'db_monitor:snapshot-overview' snapshot.id %}">Back to snapshot</a>
+    </div>
+
+    <div class="section-tabs">
+        <a href="{% url 'db_monitor:snapshot-section' snapshot.id 'queries' %}" class="{% if active_section == 'queries' %}is-active{% endif %}">Queries</a>
+        <a href="{% url 'db_monitor:snapshot-section' snapshot.id 'tables' %}" class="{% if active_section == 'tables' %}is-active{% endif %}">Tables</a>
+        <a href="{% url 'db_monitor:snapshot-section' snapshot.id 'indexes' %}" class="{% if active_section == 'indexes' %}is-active{% endif %}">Indexes</a>
+        <a href="{% url 'db_monitor:snapshot-section' snapshot.id 'activity' %}" class="{% if active_section == 'activity' %}is-active{% endif %}">Activity</a>
+        <a href="{% url 'db_monitor:snapshot-section' snapshot.id 'findings' %}" class="{% if active_section == 'findings' %}is-active{% endif %}">Findings</a>
+    </div>
+
+    {% if active_section == "queries" %}
+    <div class="split-grid">
+        <section class="panel">
+            <div class="panel-header"><h2>Top slow queries</h2></div>
+            <div class="panel-body">
+                <table class="main-table">
+                    <thead><tr><th>Query</th><th>Op</th><th>Mean ms</th><th>Max ms</th><th>Total ms</th><th>Calls</th></tr></thead>
+                    <tbody>
+                        {% for query in queries.slowest %}
+                        <tr><td><strong>{{ query.label }}</strong><br><span class="muted">{{ query.preview }}</span>{% if query.queryid %}<br><span class="muted">Fingerprint {{ query.queryid }}</span>{% endif %}</td><td>{{ query.operation_type }}</td><td>{{ query.mean_exec_time|floatformat:2 }}</td><td>{{ query.max_exec_time|floatformat:2 }}</td><td>{{ query.total_exec_time|floatformat:2 }}</td><td>{{ query.calls }}</td></tr>
+                        {% empty %}
+                        <tr><td colspan="6">No query stats available.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-header"><h2>Top hot queries</h2></div>
+            <div class="panel-body">
+                <table class="main-table">
+                    <thead><tr><th>Query</th><th>Op</th><th>Total ms</th><th>Mean ms</th><th>Calls</th><th>Rows</th></tr></thead>
+                    <tbody>
+                        {% for query in queries.hottest %}
+                        <tr><td><strong>{{ query.label }}</strong><br><span class="muted">{{ query.preview }}</span>{% if query.queryid %}<br><span class="muted">Fingerprint {{ query.queryid }}</span>{% endif %}</td><td>{{ query.operation_type }}</td><td>{{ query.total_exec_time|floatformat:2 }}</td><td>{{ query.mean_exec_time|floatformat:2 }}</td><td>{{ query.calls }}</td><td>{{ query.rows }}</td></tr>
+                        {% empty %}
+                        <tr><td colspan="6">No query stats available.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <ul class="bar-chart" style="margin-top: 16px;">
+                    {% for row in queries.charts.hot_exec_time %}
+                    <li>
+                        <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.value|floatformat:2 }} ms</span></div>
+                        <div class="bar-track"><div class="bar-fill" style="width: {{ row.percent }}%;"></div></div>
+                        <div class="chart-meta">{{ row.meta }}</div>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </section>
+    </div>
+    <section class="panel" style="margin-top: 18px;">
+        <div class="panel-header"><h2>Top queries by SQL operation</h2></div>
+        <div class="panel-body">
+            <div class="split-grid">
+                {% for operation, rows in queries.by_operation.items %}
+                <div>
+                    <h3>{{ operation }}</h3>
+                    <ul class="summary-list">
+                        {% for query in rows %}
+                        <li><strong>{{ query.label }}</strong><br><span class="muted">{{ query.total_exec_time|floatformat:2 }} ms | {{ query.calls }} calls | mean {{ query.mean_exec_time|floatformat:2 }} ms</span></li>
+                        {% empty %}
+                        <li>No {{ operation }} queries recorded.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+    {% elif active_section == "tables" %}
+    <section class="panel">
+        <div class="panel-header"><h2>Problematic table ranking</h2></div>
+        <div class="panel-body">
+            <table class="main-table">
+                <thead><tr><th>Table</th><th>Seq scans</th><th>Idx scans</th><th>Seq/Idx ratio</th><th>Live rows</th><th>Dead rows</th></tr></thead>
+                <tbody>
+                    {% for table in tables.problematic %}
+                    <tr><td>{{ table.table }}</td><td>{{ table.seq_scan }}</td><td>{{ table.idx_scan }}</td><td>{{ table.seq_to_idx_ratio|floatformat:2 }}</td><td>{{ table.n_live_tup }}</td><td>{{ table.n_dead_tup }}</td></tr>
+                    {% empty %}
+                    <tr><td colspan="6">No table stats available.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% elif active_section == "indexes" %}
+    <section class="panel">
+        <div class="panel-header"><h2>Underused indexes</h2></div>
+        <div class="panel-body">
+            <table class="main-table">
+                <thead><tr><th>Index</th><th>Table</th><th>Idx scans</th><th>Size bytes</th></tr></thead>
+                <tbody>
+                    {% for index in indexes.underused %}
+                    <tr><td>{{ index.index }}</td><td>{{ index.table }}</td><td>{{ index.idx_scan }}</td><td>{{ index.index_size_bytes }}</td></tr>
+                    {% empty %}
+                    <tr><td colspan="4">No index stats available.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% elif active_section == "activity" %}
+    <section class="panel">
+        <div class="panel-header"><h2>Longest activities</h2></div>
+        <div class="panel-body">
+            <table class="main-table">
+                <thead><tr><th>PID</th><th>State</th><th>Wait</th><th>Duration ms</th><th>Query</th></tr></thead>
+                <tbody>
+                    {% for activity in activities.longest %}
+                    <tr><td>{{ activity.pid }}</td><td>{{ activity.state|default:"-" }}</td><td>{{ activity.wait_event_type|default:"-" }} {% if activity.wait_event %}/ {{ activity.wait_event }}{% endif %}</td><td>{{ activity.duration_ms|floatformat:2 }}</td><td>{{ activity.query }}</td></tr>
+                    {% empty %}
+                    <tr><td colspan="5">No activity snapshots available.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% elif active_section == "findings" %}
+    <section class="panel">
+        <div class="panel-header"><h2>Findings</h2></div>
+        <div class="panel-body">
+            <ul class="detail-list">
+                {% for finding in findings.top %}
+                <li>
+                    <div class="inline-meta"><span class="severity-pill severity-{{ finding.severity }}">{{ finding.severity }}</span><strong>{{ finding.type }}</strong>{% if finding.display_name %}<span class="muted">{{ finding.display_name }}</span>{% endif %}</div>
+                    <p><strong>{{ finding.title }}</strong></p>
+                    <p class="muted">{{ finding.description }}</p>
+                    {% if finding.evidence_json %}<code>{{ finding.evidence_json }}</code>{% endif %}
+                </li>
+                {% empty %}
+                <li>No findings recorded for this snapshot.</li>
+                {% endfor %}
+            </ul>
+            <ul class="bar-chart" style="margin-top: 16px;">
+                {% for row in findings.charts.severity %}
+                <li>
+                    <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.value }}</span></div>
+                    <div class="bar-track"><div class="bar-fill" style="width: {{ row.percent }}%;"></div></div>
+                    <div class="chart-meta">{{ row.meta }}</div>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </section>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,107 @@
+{% extends "shop/base.html" %}
+
+{% block title %}Sales Report{% endblock %}
+
+{% block extra_css %}
+<style>
+    .report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; margin-bottom: 24px; }
+    .report-panel {
+        background: rgba(255,255,255,.45);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius);
+        padding: 20px;
+    }
+    .chart-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+    .chart-row { display: grid; gap: 6px; }
+    .chart-label { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; }
+    .chart-bar { height: 10px; background: rgba(45, 52, 54, 0.08); border-radius: 999px; overflow: hidden; }
+    .chart-bar span { display: block; height: 100%; background: linear-gradient(90deg, #059669, #34d399); }
+    .stats-summary-bar {
+        background: var(--card-bg); border: 1px solid var(--border-color); box-shadow: var(--shadow);
+        border-radius: var(--radius); padding: 30px; display: flex; align-items: center; justify-content: center;
+        gap: 80px; margin-bottom: 30px;
+    }
+    .stat-item { text-align: center; }
+    .stat-label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-light); margin-bottom: 8px; }
+    .stat-number { font-size: 32px; font-weight: 700; color: var(--primary-color); display: block; }
+    .stat-divider { width: 1px; height: 40px; background: var(--border-color); }
+    .col-category { font-weight: 600; color: var(--text-dark); text-transform: capitalize; }
+    .col-orders { text-align: center; font-weight: 500; color: var(--text-light); }
+    .col-revenue { text-align: right; font-weight: 700; color: #00b894; }
+    .currency-label { font-size: 11px; color: var(--text-light); margin-left: 4px; font-weight: 400; }
+    @media (max-width: 768px) { .stats-summary-bar { flex-direction: column; gap: 25px; padding: 20px; } .stat-divider { display: none; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <div class="page-header">
+        <h1>Sales Report</h1>
+        <p>Graficzny raport sprzedaży z podziałem na kategorie oraz ich udział w obciążeniu raportowym aplikacji.</p>
+    </div>
+
+    <div class="stats-summary-bar">
+        <div class="stat-item"><span class="stat-label">All orders</span><span class="stat-number">{{ totals.orders }}</span></div>
+        <div class="stat-divider"></div>
+        <div class="stat-item"><span class="stat-label">Active categories</span><span class="stat-number">{{ totals.categories }}</span></div>
+        <div class="stat-divider"></div>
+        <div class="stat-item"><span class="stat-label">Days in report</span><span class="stat-number">{{ window_days }}d</span></div>
+    </div>
+
+    <div class="report-grid">
+        <section class="report-panel">
+            <h2 style="margin-top: 0;">Revenue by category</h2>
+            <p class="stat-label" style="margin-bottom: 16px;">Top category: {{ summary.top_category }} ({{ summary.top_revenue }} PLN)</p>
+            <ul class="chart-list">
+                {% for row in charts.revenue %}
+                <li class="chart-row">
+                    <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.value|floatformat:2 }}{{ row.suffix }}</span></div>
+                    <div class="chart-bar"><span style="width: {{ row.width }}%;"></span></div>
+                </li>
+                {% empty %}
+                <li>No revenue data to chart.</li>
+                {% endfor %}
+            </ul>
+        </section>
+
+        <section class="report-panel">
+            <h2 style="margin-top: 0;">Orders by category</h2>
+            <ul class="chart-list">
+                {% for row in charts.orders %}
+                <li class="chart-row">
+                    <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.value }}</span></div>
+                    <div class="chart-bar"><span style="width: {{ row.width }}%;"></span></div>
+                </li>
+                {% empty %}
+                <li>No order data to chart.</li>
+                {% endfor %}
+            </ul>
+        </section>
+    </div>
+
+    <div class="content-card">
+        <div class="table-wrapper">
+            <table class="main-table">
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th style="text-align: center;">Number of orders</th>
+                        <th style="text-align: right;">Earnings</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in categories %}
+                    <tr>
+                        <td class="col-category">{{ item.category }}</td>
+                        <td class="col-orders">{{ item.order_count }}</td>
+                        <td class="col-revenue">{{ item.revenue }}<span class="currency-label">PLN</span></td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="3" style="text-align: center; padding: 40px; color: var(--text-light);">Could not find sales data in the given timeframe.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
