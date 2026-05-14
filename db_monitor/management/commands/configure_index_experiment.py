@@ -51,6 +51,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Synchronize the database-backed experiment index catalog from the built-in manifest.",
         )
+        parser.add_argument(
+            "--all-indexes",
+            action="store_true",
+            help="Apply every managed index in the selected group(s), instead of selecting only top candidates.",
+        )
 
     def handle(self, *args, **options):
         mode = options["mode"]
@@ -73,6 +78,7 @@ class Command(BaseCommand):
                     limit=limit,
                     concurrently=options["concurrently"],
                     groups=options["group"],
+                    apply_all=options["all_indexes"],
                 )
         except ValueError as exc:
             raise CommandError(str(exc)) from exc
