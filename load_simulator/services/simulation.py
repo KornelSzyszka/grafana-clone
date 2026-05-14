@@ -6,7 +6,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.db import close_old_connections, connection, transaction
+from django.db import connection, connections, transaction
 from django.db.models import F
 from django.utils import timezone
 
@@ -234,16 +234,17 @@ def _run_operation(operation, rng, context, intensity=1):
 
 
 def _run_operation_threadsafe(operation, operation_seed, context, intensity):
-    close_old_connections()
-    try:
-        rng = random.Random(operation_seed)
-        _run_operation(operation, rng, context, intensity=intensity)
-        return operation
-    finally:
-        close_old_connections()
+    rng = random.Random(operation_seed)
+    _run_operation(operation, rng, context, intensity=intensity)
+    return operation
 
 
-def _run_operation_batch(operation_batch, context, intensity, concurrency):
+def _close_worker_connection():
+    connections.close_all()
+    return None
+
+
+def _run_operation_batch(operation_batch, context, intensity, concurrency, executor=None):
     if concurrency <= 1:
         completed = []
         for operation, operation_seed in operation_batch:
@@ -251,13 +252,12 @@ def _run_operation_batch(operation_batch, context, intensity, concurrency):
         return completed
 
     completed = []
-    with ThreadPoolExecutor(max_workers=concurrency) as executor:
-        futures = [
-            executor.submit(_run_operation_threadsafe, operation, operation_seed, context, intensity)
-            for operation, operation_seed in operation_batch
-        ]
-        for future in as_completed(futures):
-            completed.append(future.result())
+    futures = [
+        executor.submit(_run_operation_threadsafe, operation, operation_seed, context, intensity)
+        for operation, operation_seed in operation_batch
+    ]
+    for future in as_completed(futures):
+        completed.append(future.result())
     return completed
 
 
@@ -312,24 +312,33 @@ def run_simulation(
 
     start = time.monotonic()
     completed = 0
+    executor = ThreadPoolExecutor(max_workers=concurrency) if concurrency > 1 else None
 
-    while True:
-        if iterations is not None and completed >= iterations:
-            break
-        if iterations is None and time.monotonic() - start >= duration:
-            break
+    try:
+        while True:
+            if iterations is not None and completed >= iterations:
+                break
+            if iterations is None and time.monotonic() - start >= duration:
+                break
 
-        batch_size = min(concurrency, (iterations - completed) if iterations is not None else concurrency)
-        operation_batch = [
-            (_choose_operation(rng, scenario), rng.randint(1, 2_000_000_000))
-            for _ in range(max(batch_size, 1))
-        ]
-        for operation in _run_operation_batch(operation_batch, context, intensity, concurrency):
-            operation_counts[operation] += 1
-            completed += 1
+            batch_size = min(concurrency, (iterations - completed) if iterations is not None else concurrency)
+            operation_batch = [
+                (_choose_operation(rng, scenario), rng.randint(1, 2_000_000_000))
+                for _ in range(max(batch_size, 1))
+            ]
+            for operation in _run_operation_batch(operation_batch, context, intensity, concurrency, executor=executor):
+                operation_counts[operation] += 1
+                completed += 1
 
-        if progress_callback and completed % 25 == 0:
-            progress_callback(f"Completed {completed} operations...")
+            if progress_callback and completed % 25 == 0:
+                progress_callback(f"Completed {completed} operations...")
+    finally:
+        if executor:
+            close_futures = [executor.submit(_close_worker_connection) for _ in range(concurrency)]
+            for future in as_completed(close_futures):
+                future.result()
+            executor.shutdown(wait=True)
+        connections.close_all()
 
     return {
         "scenario": scenario,

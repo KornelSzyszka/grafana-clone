@@ -60,6 +60,22 @@ TRAFFIC_RUNS = [
     {"scenario": "delete_cleanup_heavy", "seed_offset": 211, "intensity": 1},
 ]
 
+QUERY_COVERAGE_TRAFFIC_RUNS = [
+    {"scenario": "covering_index_experiment", "seed_offset": 11, "intensity": 2},
+    {"scenario": "catalog_heavy", "seed_offset": 23, "intensity": 2},
+    {"scenario": "details", "seed_offset": 31, "intensity": 1},
+    {"scenario": "order_history_heavy", "seed_offset": 47, "intensity": 1},
+    {"scenario": "sales_report_heavy", "seed_offset": 53, "intensity": 1},
+    {"scenario": "mixed_read_write", "seed_offset": 71, "intensity": 2},
+    {"scenario": "inventory_update_heavy", "seed_offset": 101, "intensity": 1},
+    {"scenario": "delete_cleanup_heavy", "seed_offset": 113, "intensity": 1},
+]
+
+TRAFFIC_PRESETS = {
+    "query_coverage": QUERY_COVERAGE_TRAFFIC_RUNS,
+    "full": TRAFFIC_RUNS,
+}
+
 CSV_COLUMNS = [
     "benchmark_started_at",
     "profile",
@@ -100,6 +116,7 @@ class BenchmarkOptions:
     warmup: int
     seed: int
     output: str
+    preset: str = "query_coverage"
     include_query_plans: bool = True
     reseed_each_mode: bool = True
     use_concurrently: bool = False
@@ -269,13 +286,22 @@ def _write_rows(output, rows, append=False):
         writer.writerows(rows)
 
 
+def _effective_concurrency(profile, scenario, requested_concurrency):
+    heavy_reporting = scenario in {"sales_report_heavy", "reporting"}
+    if profile == "huge" and heavy_reporting:
+        return 1
+    if profile == "huge" and scenario == "mixed_heavy":
+        return min(requested_concurrency, 2)
+    return requested_concurrency
+
+
 def run_index_benchmark(options, progress_callback=None):
     if connection.vendor != "postgresql":
         raise ValueError(f"Index benchmark requires PostgreSQL; current backend is {connection.vendor}.")
 
     sync_experiment_index_catalog()
     started_at = timezone.now().isoformat()
-    traffic_runs = TRAFFIC_RUNS[: max(1, options.runs)]
+    traffic_runs = TRAFFIC_PRESETS[options.preset][: max(1, options.runs)]
     wrote_header = False
     total_rows = 0
     snapshots = []
@@ -296,9 +322,10 @@ def run_index_benchmark(options, progress_callback=None):
                 seed = options.seed + traffic["seed_offset"] + run_number
                 scenario = traffic["scenario"]
                 intensity = traffic["intensity"]
+                effective_concurrency = _effective_concurrency(profile, scenario, options.concurrency)
                 label = f"bench-{profile}-{index_mode}-{run_number:02d}-{scenario}"
                 if progress_callback:
-                    progress_callback(f"Running {label}...")
+                    progress_callback(f"Running {label} with concurrency={effective_concurrency}...")
 
                 reset_pg_stats()
                 summary = run_simulation(
@@ -306,7 +333,7 @@ def run_index_benchmark(options, progress_callback=None):
                     duration=30,
                     seed=seed,
                     iterations=options.iterations,
-                    concurrency=options.concurrency,
+                    concurrency=effective_concurrency,
                     warmup=options.warmup,
                     intensity=intensity,
                     profile=profile,
@@ -325,7 +352,7 @@ def run_index_benchmark(options, progress_callback=None):
                     "seed": seed,
                     "index_mode": index_mode,
                     "iterations": options.iterations,
-                    "concurrency": options.concurrency,
+                    "concurrency": effective_concurrency,
                     "intensity": intensity,
                     "warmup": options.warmup,
                     "snapshot_id": snapshot.id,
@@ -343,5 +370,6 @@ def run_index_benchmark(options, progress_callback=None):
         "snapshots": snapshots,
         "profiles": options.profiles,
         "runs": len(traffic_runs),
+        "preset": options.preset,
         "index_modes": ["none", "regular", "covering"],
     }

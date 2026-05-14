@@ -9,7 +9,7 @@ from db_monitor.services.index_experiments import recommend_experiment_indexes
 from db_monitor.services.reporting import get_comparison_report, get_dashboard_overview, get_snapshot_report
 from db_monitor.models import AnalysisFinding, IndexStatSnapshot, QueryStatSnapshot, StatsSnapshot, TableStatSnapshot
 from db_monitor.models import ExperimentIndexDefinition, ExperimentIndexGroup
-from db_monitor.services.benchmark_indexes import _operation_rows
+from db_monitor.services.benchmark_indexes import TRAFFIC_PRESETS, _effective_concurrency, _operation_rows
 from db_monitor.services.query_classification import classify_sql_operation
 from load_simulator.models import WorkloadRun
 
@@ -709,6 +709,15 @@ class IndexBenchmarkCsvTests(TestCase):
     def test_run_index_benchmark_requires_postgresql(self):
         with self.assertRaisesMessage(Exception, "requires PostgreSQL"):
             call_command("run_index_benchmark", "--profile=medium", "--runs=1", "--iterations=1")
+
+    def test_query_coverage_preset_is_shorter_than_full_matrix(self):
+        self.assertLess(len(TRAFFIC_PRESETS["query_coverage"]), len(TRAFFIC_PRESETS["full"]))
+        self.assertEqual(len(TRAFFIC_PRESETS["query_coverage"]), 8)
+
+    def test_huge_reporting_benchmark_caps_concurrency(self):
+        self.assertEqual(_effective_concurrency("huge", "sales_report_heavy", 4), 1)
+        self.assertEqual(_effective_concurrency("huge", "reporting", 4), 1)
+        self.assertEqual(_effective_concurrency("large", "sales_report_heavy", 4), 4)
 
 
 class IndexExperimentSelectionTests(TestCase):
