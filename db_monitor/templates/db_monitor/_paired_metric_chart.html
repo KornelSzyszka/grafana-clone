@@ -6,9 +6,9 @@
     <div class="paired-row">
         <span class="paired-row-label">Before</span>
         <div class="paired-track">
-            <div class="paired-fill paired-before" style="width: {{ metric.before_percent }}%;"></div>
+            <div class="paired-fill paired-before" style="width: {{ metric.before_percent|stringformat:'f' }}%;"></div>
             {% if metric.before_percent < 100 %}
-            <div class="paired-gap" style="left: {{ metric.before_percent }}%; width: calc(100% - {{ metric.before_percent }}%);"></div>
+            <div class="paired-gap" style="left: {{ metric.before_percent|stringformat:'f' }}%; width: calc(100% - {{ metric.before_percent|stringformat:'f' }}%);"></div>
             {% endif %}
         </div>
         <span class="paired-bar-value">
@@ -19,9 +19,9 @@
     <div class="paired-row">
         <span class="paired-row-label">After</span>
         <div class="paired-track">
-            <div class="paired-fill paired-after" style="width: {{ metric.after_percent }}%;"></div>
+            <div class="paired-fill paired-after" style="width: {{ metric.after_percent|stringformat:'f' }}%;"></div>
             {% if metric.after_percent < 100 %}
-            <div class="paired-gap" style="left: {{ metric.after_percent }}%; width: calc(100% - {{ metric.after_percent }}%);"></div>
+            <div class="paired-gap" style="left: {{ metric.after_percent|stringformat:'f' }}%; width: calc(100% - {{ metric.after_percent|stringformat:'f' }}%);"></div>
             {% endif %}
         </div>
         <span class="paired-bar-value">

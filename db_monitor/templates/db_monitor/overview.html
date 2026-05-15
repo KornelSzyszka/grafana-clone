@@ -66,8 +66,8 @@
                     <li>
                         <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.delta|floatformat:2 }}</span></div>
                         <div class="paired-bars">
-                            <div class="bar-track"><div class="bar-fill paired-before" style="width: {{ row.before_percent }}%;"></div></div>
-                            <div class="bar-track"><div class="bar-fill paired-after" style="width: {{ row.after_percent }}%;"></div></div>
+                            <div class="bar-track"><div class="bar-fill paired-before" style="width: {{ row.before_percent|stringformat:'f' }}%;"></div></div>
+                            <div class="bar-track"><div class="bar-fill paired-after" style="width: {{ row.after_percent|stringformat:'f' }}%;"></div></div>
                         </div>
                         <div class="paired-bar-labels"><span>Before {{ row.before|floatformat:2 }}</span><span>After {{ row.after|floatformat:2 }}</span></div>
                     </li>
@@ -105,7 +105,7 @@
                     {% for row in latest_snapshot.charts.hot_queries %}
                     <li>
                         <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.value|floatformat:2 }} ms</span></div>
-                        <div class="bar-track"><div class="bar-fill" style="width: {{ row.percent }}%;"></div></div>
+                        <div class="bar-track"><div class="bar-fill" style="width: {{ row.percent|stringformat:'f' }}%;"></div></div>
                         <div class="chart-meta">{{ row.meta }}</div>
                     </li>
                     {% endfor %}
@@ -120,7 +120,7 @@
                     {% for row in latest_snapshot.charts.table_scans %}
                     <li>
                         <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.value }}</span></div>
-                        <div class="bar-track"><div class="bar-fill" style="width: {{ row.percent }}%;"></div></div>
+                        <div class="bar-track"><div class="bar-fill" style="width: {{ row.percent|stringformat:'f' }}%;"></div></div>
                         <div class="chart-meta">{{ row.meta }}</div>
                     </li>
                     {% endfor %}
