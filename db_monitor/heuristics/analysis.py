@@ -14,6 +14,8 @@ DEFAULT_THRESHOLDS = {
     "seq_scan_table_min": 100,
     "seq_scan_live_rows_min": 1000,
     "seq_scan_ratio_min": 3.0,
+    "covering_index_total_ms": 1000.0,
+    "covering_index_calls": 25,
 }
 
 
@@ -32,6 +34,14 @@ def _truncate_query(query_text, limit=180):
     if len(query_text) <= limit:
         return query_text
     return f"{query_text[: limit - 3]}..."
+
+
+def _query_display_name(queryid, preview):
+    return _truncate_query(preview or queryid or "Query without fingerprint", limit=90)
+
+
+def _query_object_name(queryid, preview):
+    return _truncate_query(preview or queryid or "Query without fingerprint", limit=180)
 
 
 def _severity_for_slow_query(mean_ms, max_ms):
@@ -76,13 +86,13 @@ def _slow_query_candidates(snapshot, thresholds):
             FindingCandidate(
                 type="slow_query",
                 severity=_severity_for_slow_query(query_stat.mean_exec_time, query_stat.max_exec_time),
-                title=f"Slow query detected ({query_stat.queryid or 'no-queryid'})",
+                title=f"Slow query detected: {_query_display_name(query_stat.queryid, preview)}",
                 description=(
                     "The query exceeds the configured execution-time threshold and should be reviewed for indexes, "
                     "join strategy, or application-side batching."
                 ),
                 object_type="query",
-                object_name=query_stat.queryid or preview,
+                object_name=_query_object_name(query_stat.queryid, preview),
                 evidence_json={
                     "queryid": query_stat.queryid,
                     "query_preview": preview,
@@ -109,13 +119,13 @@ def _hot_query_candidates(snapshot, thresholds):
             FindingCandidate(
                 type="hot_query",
                 severity=_severity_for_hot_query(query_stat.total_exec_time, query_stat.calls),
-                title=f"High-cost hot query ({query_stat.queryid or 'no-queryid'})",
+                title=f"High-cost hot query: {_query_display_name(query_stat.queryid, preview)}",
                 description=(
                     "The query contributes a large cumulative execution cost. Even if single runs are acceptable, "
                     "its frequency makes it a likely optimization target."
                 ),
                 object_type="query",
-                object_name=query_stat.queryid or preview,
+                object_name=_query_object_name(query_stat.queryid, preview),
                 evidence_json={
                     "queryid": query_stat.queryid,
                     "query_preview": preview,
@@ -206,12 +216,135 @@ def _seq_scan_candidates(snapshot, thresholds):
     return candidates
 
 
+def _covering_index_candidates(snapshot, thresholds):
+    rules = [
+        {
+            "name": "shop_product_covering_catalog_idx",
+            "table": "shop_product",
+            "tokens": ["shop_product", "is_active", "created_at"],
+            "columns": ["is_active", "category_id", "created_at DESC"],
+            "include": ["id", "name", "slug", "price", "stock", "popularity_score"],
+            "reason": "active catalog listings filter and sort on a narrow column set and return only listing fields",
+        },
+        {
+            "name": "shop_product_active_price_covering_idx",
+            "table": "shop_product",
+            "tokens": ["shop_product", "is_active", "price"],
+            "columns": ["is_active", "category_id", "price", "name"],
+            "include": ["id", "slug", "stock", "popularity_score"],
+            "reason": "price-sorted catalog listings can be served from a covering B-tree index",
+        },
+        {
+            "name": "shop_product_popularity_covering_idx",
+            "table": "shop_product",
+            "tokens": ["shop_product", "is_active", "popularity_score"],
+            "columns": ["is_active", "category_id", "popularity_score DESC", "name"],
+            "include": ["id", "slug", "price", "stock", "created_at"],
+            "reason": "popular catalog listings repeatedly sort active/category products by popularity",
+        },
+        {
+            "name": "shop_product_slug_detail_covering_idx",
+            "table": "shop_product",
+            "tokens": ["shop_product", "slug", "is_active"],
+            "columns": ["slug", "is_active"],
+            "include": ["id", "name", "description", "price", "stock", "category_id", "popularity_score"],
+            "reason": "product detail lookup uses slug and returns a compact detail projection",
+        },
+        {
+            "name": "shop_product_similar_covering_idx",
+            "table": "shop_product",
+            "tokens": ["shop_product", "category_id", "popularity_score"],
+            "columns": ["category_id", "is_active", "popularity_score DESC", "name"],
+            "include": ["id", "slug", "price", "stock"],
+            "reason": "similar product lookup filters by category and sorts by popularity",
+        },
+        {
+            "name": "shop_order_user_created_at_covering_idx",
+            "table": "shop_order",
+            "tokens": ["shop_order", "user_id", "created_at"],
+            "columns": ["user_id", "created_at DESC"],
+            "include": ["id", "status", "total_amount"],
+            "reason": "order history repeatedly filters by user and returns summary fields ordered by newest order",
+        },
+        {
+            "name": "shop_orderitem_order_covering_idx",
+            "table": "shop_orderitem",
+            "tokens": ["shop_orderitem", "order_id"],
+            "columns": ["order_id"],
+            "include": ["product_id", "quantity", "unit_price", "line_total"],
+            "reason": "order history renders order item fields after selecting orders",
+        },
+        {
+            "name": "shop_order_status_created_at_covering_idx",
+            "table": "shop_order",
+            "tokens": ["shop_order", "status", "created_at"],
+            "columns": ["status", "created_at DESC"],
+            "include": ["id", "user_id", "total_amount"],
+            "reason": "sales reports repeatedly filter orders by status and time window",
+        },
+        {
+            "name": "shop_review_product_created_at_covering_idx",
+            "table": "shop_review",
+            "tokens": ["shop_review", "product_id", "created_at"],
+            "columns": ["product_id", "created_at DESC"],
+            "include": ["id", "user_id", "rating", "content"],
+            "reason": "product detail pages read recent reviews for one product",
+        },
+        {
+            "name": "load_cart_cleanup_covering_idx",
+            "table": "load_simulator_democart",
+            "tokens": ["load_simulator_democart", "expires_at"],
+            "columns": ["expires_at", "status"],
+            "include": ["id", "user_id"],
+            "reason": "cleanup workload scans bounded expired carts before DELETE",
+        },
+    ]
+
+    candidates = []
+    for query_stat in snapshot.query_stats.all():
+        normalized = " ".join((query_stat.query_text_normalized or "").split()).lower()
+        if query_stat.total_exec_time < thresholds["covering_index_total_ms"] and query_stat.calls < thresholds["covering_index_calls"]:
+            continue
+        for rule in rules:
+            if not all(token in normalized for token in rule["tokens"]):
+                continue
+            preview = _truncate_query(query_stat.query_text_normalized.replace("\n", " "))
+            candidates.append(
+                FindingCandidate(
+                    type="covering_index_candidate",
+                    severity=_severity_for_hot_query(query_stat.total_exec_time, query_stat.calls),
+                    title=f"Covering index candidate `{rule['name']}`",
+                    description=(
+                        "This query pattern is a candidate for a PostgreSQL B-tree index with INCLUDE columns. "
+                        "The goal is to reduce heap fetches and make index-only scans possible after VACUUM visibility improves."
+                    ),
+                    object_type="query",
+                    object_name=_query_object_name(query_stat.queryid, preview),
+                    evidence_json={
+                        "queryid": query_stat.queryid,
+                        "query_preview": preview,
+                        "calls": query_stat.calls,
+                        "total_exec_time": query_stat.total_exec_time,
+                        "mean_exec_time": query_stat.mean_exec_time,
+                        "suggested_index": rule["name"],
+                        "table": rule["table"],
+                        "columns": rule["columns"],
+                        "include": rule["include"],
+                        "reason": rule["reason"],
+                    },
+                )
+            )
+            break
+    return candidates
+
+
 def _build_candidates(snapshot, thresholds):
     candidates = []
     candidates.extend(_slow_query_candidates(snapshot, thresholds))
     candidates.extend(_hot_query_candidates(snapshot, thresholds))
     candidates.extend(_unused_index_candidates(snapshot, thresholds))
     candidates.extend(_seq_scan_candidates(snapshot, thresholds))
+    candidates.extend(_covering_index_candidates(snapshot, thresholds))
     return candidates
 
 

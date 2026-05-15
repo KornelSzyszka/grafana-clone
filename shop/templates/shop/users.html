@@ -4,16 +4,22 @@
 
 {% block extra_css %}
 <style>
-    /* Dodatkowe, specyficzne style dla tej tabeli */
-    .user-id {
-        color: var(--text-light);
-        font-family: monospace;
-        font-size: 12px;
+    .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .summary-card, .visual-panel {
+        background: rgba(255,255,255,.45);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius);
+        padding: 18px;
     }
-    
-    .user-email {
-        color: var(--text-light);
-    }
+    .summary-card strong { display: block; font-size: 28px; margin-top: 6px; }
+    .visual-panel { margin-bottom: 24px; }
+    .chart-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+    .chart-row { display: grid; gap: 6px; }
+    .chart-label { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; }
+    .chart-bar { height: 10px; background: rgba(45, 52, 54, 0.08); border-radius: 999px; overflow: hidden; }
+    .chart-bar span { display: block; height: 100%; background: linear-gradient(90deg, #0ea5e9, #38bdf8); }
+    .user-id { color: var(--text-light); font-family: monospace; font-size: 12px; }
+    .user-email { color: var(--text-light); }
 </style>
 {% endblock %}
 
@@ -21,8 +27,28 @@
 <div class="page-container">
     <div class="page-header">
         <h1>Users</h1>
-        <p>List of users in the system ({{ users|length }})</p>
+        <p>Graficzny widok użytkowników aplikacji i ich dostępności do scenariuszy symulacji ruchu.</p>
     </div>
+
+    <div class="summary-grid">
+        <div class="summary-card"><span>Total users</span><strong>{{ summary.count }}</strong></div>
+        <div class="summary-card"><span>Users with email</span><strong>{{ summary.with_email }}</strong></div>
+        <div class="summary-card"><span>Users without email</span><strong>{{ summary.without_email }}</strong></div>
+    </div>
+
+    <section class="visual-panel">
+        <h2 style="margin-top: 0;">User distribution</h2>
+        <ul class="chart-list">
+            {% for row in charts.user_ids %}
+            <li class="chart-row">
+                <div class="chart-label"><span>{{ row.label }}</span><span>#{{ row.value }}</span></div>
+                <div class="chart-bar"><span style="width: {{ row.width }}%;"></span></div>
+            </li>
+            {% empty %}
+            <li>No users to chart.</li>
+            {% endfor %}
+        </ul>
+    </section>
 
     <div class="content-card">
         <div class="table-wrapper">
@@ -32,7 +58,7 @@
                         <th style="width: 80px;">ID</th>
                         <th>Username</th>
                         <th>Email</th>
-                        <th style="text-align: right;">User page</th>
+                        <th style="text-align: right;">Orders API</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -41,16 +67,10 @@
                         <td class="user-id">#{{ user.id }}</td>
                         <td><strong>{{ user.username }}</strong></td>
                         <td class="user-email">{{ user.email }}</td>
-                        <td style="text-align: right;">
-                            <a href="/api/users/{{ user.id }}/orders/" class="btn-action">Page</a>
-                        </td>
+                        <td style="text-align: right;"><a href="/api/users/{{ user.id }}/orders/" class="btn-action">JSON</a></td>
                     </tr>
                     {% empty %}
-                    <tr>
-                        <td colspan="4" style="text-align: center; padding: 40px; color: var(--text-light);">
-                            No users to show.
-                        </td>
-                    </tr>
+                    <tr><td colspan="4" style="text-align: center; padding: 40px; color: var(--text-light);">No users to show.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>

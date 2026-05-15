@@ -17,6 +17,7 @@ class Command(BaseCommand):
                 size=options["size"],
                 seed=options["seed"],
                 clear_existing=not options["keep_existing"],
+                progress_callback=lambda message: self.stdout.write(message),
             )
         except ValueError as exc:
             raise CommandError(str(exc)) from exc

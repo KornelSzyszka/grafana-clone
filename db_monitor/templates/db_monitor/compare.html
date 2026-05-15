@@ -1,0 +1,251 @@
+{% extends "db_monitor/base.html" %}
+
+{% block title %}Snapshot Comparison{% endblock %}
+
+{% block content %}
+<div class="monitor-shell">
+    <div class="monitor-hero">
+        <div class="monitor-title">
+            <h1>Snapshot comparison</h1>
+            <p>Before/after view backed by the existing `compare_snapshots` service.</p>
+        </div>
+        <a class="button-link" href="{% url 'db_monitor:overview' %}">Back to dashboard</a>
+    </div>
+
+    <form method="get" class="compare-form panel panel-body">
+        <label>Snapshot A
+            <select name="snapshot_a">
+                <option value="">Choose snapshot</option>
+                {% for snapshot_option in snapshot_options %}
+                <option value="{{ snapshot_option.id }}" {% if snapshot_a and snapshot_option.id == snapshot_a.id %}selected{% endif %}>#{{ snapshot_option.id }} {{ snapshot_option.label|default:"No label" }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>Snapshot B
+            <select name="snapshot_b">
+                <option value="">Choose snapshot</option>
+                {% for snapshot_option in snapshot_options %}
+                <option value="{{ snapshot_option.id }}" {% if snapshot_b and snapshot_option.id == snapshot_b.id %}selected{% endif %}>#{{ snapshot_option.id }} {{ snapshot_option.label|default:"No label" }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button class="button-link" type="submit">Compare</button>
+    </form>
+
+    {% if summary %}
+    <div class="metrics-grid">
+        <div class="metric-card"><div class="label">Findings Delta</div><div class="value">{{ summary.findings.totals.delta }}</div><div class="subvalue">{{ summary.findings.totals.before }} to {{ summary.findings.totals.after }}</div></div>
+        <div class="metric-card"><div class="label">After Query Exec</div><div class="value">{{ summary.queries.totals.after.total_exec_time|floatformat:2 }}</div><div class="subvalue">total ms</div></div>
+        <div class="metric-card"><div class="label">Write Exec Delta</div><div class="value">{{ summary.queries.write_totals.total_exec_time.delta|floatformat:2 }}</div><div class="subvalue">INSERT/UPDATE/DELETE ms</div></div>
+        <div class="metric-card"><div class="label">After Seq Scans</div><div class="value">{{ summary.tables.totals.after.seq_scan }}</div><div class="subvalue">table scan count</div></div>
+        <div class="metric-card"><div class="label">After Index Usage</div><div class="value">{{ summary.indexes.totals.after.idx_scan }}</div><div class="subvalue">idx scan count</div></div>
+    </div>
+    {% if index_experiment_story %}
+    <section class="panel" style="margin-bottom: 18px;">
+        <div class="panel-header"><h2>Index experiment state</h2></div>
+        <div class="panel-body">
+            <div class="key-value">
+                <div><span class="label">Before snapshot mode</span><strong>{{ index_experiment_story.before_mode }}</strong></div>
+                <div><span class="label">After snapshot mode</span><strong>{{ index_experiment_story.after_mode }}</strong></div>
+                <div><span class="label">Indexes added in after</span><strong>{{ index_experiment_story.added_count }}</strong></div>
+                <div><span class="label">Expected flow</span><strong>{% if index_experiment_story.is_valid_before_after %}without indexes -> with indexes{% else %}manual review needed{% endif %}</strong></div>
+            </div>
+            {% if index_experiment_story.selection_basis %}
+            <p class="muted" style="margin-top: 16px;">Selection basis: {{ index_experiment_story.selection_basis|join:", " }}.</p>
+            {% endif %}
+            <ul class="summary-list" style="margin-top: 16px;">
+                {% for change in index_experiment_story.changes %}
+                <li>
+                    <strong>{{ change.name }}</strong><br>
+                    <span class="muted">{{ change.table }} | {{ change.description }}</span><br>
+                    {% if change.columns %}<span class="muted">columns: {{ change.columns }}</span><br>{% endif %}
+                    <span class="muted">before: {{ change.before_present }} | after: {{ change.after_present }} | change: {{ change.change }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </section>
+    {% endif %}
+
+    <div class="split-grid">
+        <section class="panel">
+            <div class="panel-header"><h2>Top query regressions</h2></div>
+            <div class="panel-body">
+                <ul class="summary-list">
+                    {% if index_experiment_story %}
+                    <li>
+                        <strong>Experiment summary</strong><br>
+                        <span class="muted">Added indexes in after: {{ index_experiment_story.added_count }} | Removed indexes: {{ index_experiment_story.removed_count }}</span><br>
+                        <span class="muted">Indexes are chosen from the controlled experiment list and target known bottlenecks such as recent-product sorting and product text search.</span>
+                    </li>
+                    {% endif %}
+                    {% for entry in summary.queries.top_regressions %}
+                    <li>
+                        <strong>{{ entry.query_label }}</strong><br>
+                        <span class="muted">Total delta {{ entry.total_exec_time.delta|floatformat:2 }} ms | Mean delta {{ entry.mean_exec_time.delta|floatformat:2 }} ms</span>
+                        {% if entry.queryid %}<br><span class="muted">Fingerprint {{ entry.queryid }}</span>{% endif %}
+                        <ul class="paired-chart" style="margin-top: 12px;">
+                            <li>
+                                <div class="chart-label"><span>Total execution time</span><span>{{ entry.total_exec_time.before|floatformat:2 }} -> {{ entry.total_exec_time.after|floatformat:2 }} ms</span></div>
+                                {% include "db_monitor/_paired_metric_chart.html" with metric=entry.total_exec_time unit="ms" %}
+                            </li>
+                            <li>
+                                <div class="chart-label"><span>Mean execution time</span><span>{{ entry.mean_exec_time.before|floatformat:2 }} -> {{ entry.mean_exec_time.after|floatformat:2 }} ms</span></div>
+                                {% include "db_monitor/_paired_metric_chart.html" with metric=entry.mean_exec_time unit="ms" %}
+                            </li>
+                        </ul>
+                    </li>
+                    {% empty %}
+                    <li>No regressions detected.</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </section>
+        <section class="panel">
+            <div class="panel-header"><h2>Top improvements</h2></div>
+            <div class="panel-body">
+                <ul class="summary-list">
+                    {% if index_experiment_story %}
+                    <li>
+                        <strong>Index-backed improvements</strong><br>
+                        <span class="muted">This list prioritizes query pairs that match indexes physically added in the `after` snapshot.</span>
+                    </li>
+                    {% endif %}
+                    {% for entry in summary.queries.top_improvements %}
+                    <li>
+                        <strong>{{ entry.query_label }}</strong><br>
+                        <span class="muted">Total delta {{ entry.total_exec_time.delta|floatformat:2 }} ms | Mean delta {{ entry.mean_exec_time.delta|floatformat:2 }} ms</span>
+                        {% if entry.queryid %}<br><span class="muted">Fingerprint {{ entry.queryid }}</span>{% endif %}
+                        <ul class="paired-chart" style="margin-top: 12px;">
+                            <li>
+                                <div class="chart-label"><span>Total execution time</span><span>{{ entry.total_exec_time.before|floatformat:2 }} -> {{ entry.total_exec_time.after|floatformat:2 }} ms</span></div>
+                                {% include "db_monitor/_paired_metric_chart.html" with metric=entry.total_exec_time unit="ms" %}
+                            </li>
+                            <li>
+                                <div class="chart-label"><span>Mean execution time</span><span>{{ entry.mean_exec_time.before|floatformat:2 }} -> {{ entry.mean_exec_time.after|floatformat:2 }} ms</span></div>
+                                {% include "db_monitor/_paired_metric_chart.html" with metric=entry.mean_exec_time unit="ms" %}
+                            </li>
+                        </ul>
+                    </li>
+                    {% empty %}
+                    <li>No improvements detected.</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </section>
+    </div>
+
+    <section class="panel" style="margin-top: 18px;">
+        <div class="panel-header"><h2>Read and write workload cost</h2></div>
+        <div class="panel-body">
+            <div class="key-value">
+                <div><span class="label">Read total ms</span><strong>{{ summary.queries.read_totals.total_exec_time.before|floatformat:2 }} -> {{ summary.queries.read_totals.total_exec_time.after|floatformat:2 }}</strong></div>
+                <div><span class="label">Write total ms</span><strong>{{ summary.queries.write_totals.total_exec_time.before|floatformat:2 }} -> {{ summary.queries.write_totals.total_exec_time.after|floatformat:2 }}</strong></div>
+                {% for operation, metrics in summary.queries.by_operation.items %}
+                <div><span class="label">{{ operation }} total ms</span><strong>{{ metrics.total_exec_time.before|floatformat:2 }} -> {{ metrics.total_exec_time.after|floatformat:2 }}</strong></div>
+                {% endfor %}
+            </div>
+            <div class="split-grid" style="margin-top: 16px;">
+                {% for operation, rows in summary.queries.top_by_operation.items %}
+                <div>
+                    <h3>{{ operation }}</h3>
+                    <ul class="summary-list">
+                        {% for entry in rows %}
+                        <li><strong>{{ entry.query_label }}</strong><br><span class="muted">after {{ entry.total_exec_time.after|floatformat:2 }} ms | calls {{ entry.calls.after }}</span></li>
+                        {% empty %}
+                        <li>No {{ operation }} queries.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+
+    <div class="split-grid" style="margin-top: 18px;">
+        <section class="panel"><div class="panel-header"><h2>Table scan deltas</h2></div><div class="panel-body"><ul class="summary-list">{% for entry in summary.tables.top_seq_scan_increases %}<li><strong>{{ entry.table }}</strong><br><span class="muted">Seq delta {{ entry.seq_scan.delta }} | Idx delta {{ entry.idx_scan.delta }}</span></li>{% empty %}<li>No table increases detected.</li>{% endfor %}</ul></div></section>
+        <section class="panel">
+            <div class="panel-header"><h2>Finding changes</h2></div>
+            <div class="panel-body">
+                <ul class="summary-list">
+                    {% for finding in summary.findings.new %}
+                    <li><span class="severity-pill severity-{{ finding.severity }}">{{ finding.severity }}</span> <strong>New:</strong> {{ finding.type }}{% if finding.display_name %} | {{ finding.display_name }}{% endif %}</li>
+                    {% empty %}
+                    <li>No new findings introduced.</li>
+                    {% endfor %}
+                    {% for finding in summary.findings.resolved %}
+                    <li><span class="severity-pill severity-{{ finding.severity }}">{{ finding.severity }}</span> <strong>Resolved:</strong> {{ finding.type }}{% if finding.display_name %} | {{ finding.display_name }}{% endif %}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </section>
+    </div>
+    <section class="panel" style="margin-top: 18px;">
+        <div class="panel-header"><h2>Workload charts</h2></div>
+        <div class="panel-body">
+            <ul class="paired-chart">
+                {% for row in workload_chart %}
+                <li>
+                    <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.delta|floatformat:2 }}</span></div>
+                    {% include "db_monitor/_paired_metric_chart.html" with metric=row %}
+                </li>
+                {% endfor %}
+            </ul>
+            {% if finding_severity_chart %}
+            <ul class="paired-chart" style="margin-top: 16px;">
+                {% for row in finding_severity_chart %}
+                <li>
+                    <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.delta }}</span></div>
+                    {% include "db_monitor/_paired_metric_chart.html" with metric=row %}
+                </li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </div>
+    </section>
+    {% if index_advisories %}
+    <section class="panel" style="margin-top: 18px;">
+        <div class="panel-header"><h2>Index recommendations</h2></div>
+        <div class="panel-body">
+            <ul class="detail-list">
+                {% for advisory in index_advisories %}
+                <li>
+                    <div class="inline-meta">
+                        <strong>{{ advisory.title }}</strong>
+                        <span class="muted">{{ advisory.target.table }}</span>
+                    </div>
+                    <p class="muted">{{ advisory.reason }}</p>
+                    <div class="key-value">
+                        <div><span class="label">Target field</span><strong>{{ advisory.target.field }}</strong></div>
+                        <div><span class="label">Recommended location</span><strong>{{ advisory.target.recommended_location }}</strong></div>
+                        <div><span class="label">Before total ms</span><strong>{{ advisory.query_comparison.before_total_ms|floatformat:2 }}</strong></div>
+                        <div><span class="label">After total ms</span><strong>{{ advisory.query_comparison.after_total_ms|floatformat:2 }}</strong></div>
+                        <div><span class="label">Before mean ms</span><strong>{{ advisory.query_comparison.before_mean_ms|floatformat:2 }}</strong></div>
+                        <div><span class="label">After mean ms</span><strong>{{ advisory.query_comparison.after_mean_ms|floatformat:2 }}</strong></div>
+                    </div>
+                    {% if advisory.table_comparison %}
+                    <div class="key-value" style="margin-top: 12px;">
+                        <div><span class="label">Seq scans before</span><strong>{{ advisory.table_comparison.before_seq_scan }}</strong></div>
+                        <div><span class="label">Seq scans after</span><strong>{{ advisory.table_comparison.after_seq_scan }}</strong></div>
+                        <div><span class="label">Idx scans before</span><strong>{{ advisory.table_comparison.before_idx_scan }}</strong></div>
+                        <div><span class="label">Idx scans after</span><strong>{{ advisory.table_comparison.after_idx_scan }}</strong></div>
+                    </div>
+                    {% endif %}
+                    <p><strong>Django index:</strong> {{ advisory.target.django_index }}</p>
+                    <code>{{ advisory.target.sql }}</code>
+                    <ul class="summary-list" style="margin-top: 12px;">
+                        {% for item in advisory.expected_impact %}
+                        <li>{{ item }}</li>
+                        {% endfor %}
+                    </ul>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </section>
+    {% endif %}
+    {% else %}
+    <section class="panel"><div class="panel-header"><h2>Choose two snapshots</h2></div><div class="panel-body"><p>No comparison is loaded yet. Select snapshot A and snapshot B to render the before/after report.</p></div></section>
+    {% endif %}
+</div>
+{% endblock %}

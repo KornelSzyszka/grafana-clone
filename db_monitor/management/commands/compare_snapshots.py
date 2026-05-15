@@ -68,8 +68,25 @@ class Command(BaseCommand):
             f"total_exec_time {queries['totals']['before']['total_exec_time']:.2f} -> "
             f"{queries['totals']['after']['total_exec_time']:.2f} ms"
         )
+        self.stdout.write(
+            f"Read workload total_exec_time: {queries['read_totals']['total_exec_time']['before']:.2f} -> "
+            f"{queries['read_totals']['total_exec_time']['after']:.2f} ms | "
+            f"Write workload total_exec_time: {queries['write_totals']['total_exec_time']['before']:.2f} -> "
+            f"{queries['write_totals']['total_exec_time']['after']:.2f} ms"
+        )
+        for operation in ["SELECT", "INSERT", "UPDATE", "DELETE"]:
+            metrics = queries["by_operation"].get(operation)
+            if not metrics:
+                continue
+            self.stdout.write(
+                f"- {operation}: calls {metrics['calls']['before']} -> {metrics['calls']['after']}, "
+                f"total_exec_time {metrics['total_exec_time']['before']:.2f} -> "
+                f"{metrics['total_exec_time']['after']:.2f} ms"
+            )
         self._write_query_section("Top query regressions", queries["top_regressions"], top)
         self._write_query_section("Top query improvements", queries["top_improvements"], top)
+        for operation in ["SELECT", "INSERT", "UPDATE", "DELETE"]:
+            self._write_query_section(f"Top {operation} queries after snapshot", queries["top_by_operation"][operation], top)
 
         self.stdout.write(
             f"Table totals: seq_scan {tables['totals']['before']['seq_scan']} -> "
@@ -107,7 +124,7 @@ class Command(BaseCommand):
         for entry in entries:
             self.stdout.write(
                 "- "
-                f"{entry['queryid'] or entry['query_preview']} | "
+                f"[{entry.get('operation_type', 'UNKNOWN')}] {entry['queryid'] or entry['query_preview']} | "
                 f"total_exec_time {entry['total_exec_time']['before']:.2f} -> {entry['total_exec_time']['after']:.2f} "
                 f"(delta {entry['total_exec_time']['delta']:+.2f}) | "
                 f"mean_exec_time {entry['mean_exec_time']['before']:.2f} -> {entry['mean_exec_time']['after']:.2f} "

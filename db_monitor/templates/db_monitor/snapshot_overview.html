@@ -1,0 +1,111 @@
+{% extends "db_monitor/base.html" %}
+
+{% block title %}Snapshot {{ snapshot.id }}{% endblock %}
+
+{% block content %}
+<div class="monitor-shell">
+    <div class="monitor-hero">
+        <div class="monitor-title">
+            <h1>Snapshot #{{ snapshot.id }}</h1>
+            <p>{{ snapshot.label|default:"No label" }} | {{ snapshot.environment|default:"no environment" }} | {{ snapshot.database_vendor }}</p>
+        </div>
+        <a class="button-link" href="{% url 'db_monitor:compare' %}">Open comparison</a>
+    </div>
+
+    <div class="monitor-nav">
+        <a href="{% url 'db_monitor:overview' %}">Dashboard</a>
+        <a href="{% url 'db_monitor:compare' %}">Comparison</a>
+    </div>
+
+    <div class="metrics-grid">
+        <div class="metric-card"><div class="label">Status</div><div class="value"><span class="status-pill status-{{ snapshot.status }}">{{ snapshot.status }}</span></div></div>
+        <div class="metric-card"><div class="label">Findings</div><div class="value">{{ summary.counts.findings }}</div></div>
+        <div class="metric-card"><div class="label">Queries</div><div class="value">{{ summary.counts.queries }}</div></div>
+        <div class="metric-card"><div class="label">Activities</div><div class="value">{{ summary.counts.activities }}</div></div>
+        <div class="metric-card"><div class="label">Query Plans</div><div class="value">{{ summary.counts.query_plans }}</div><div class="subvalue">{{ summary.query_plans.index_only_count }} index-only</div></div>
+    </div>
+
+    <div class="section-tabs">
+        <a href="{% url 'db_monitor:snapshot-section' snapshot.id 'queries' %}">Queries</a>
+        <a href="{% url 'db_monitor:snapshot-section' snapshot.id 'tables' %}">Tables</a>
+        <a href="{% url 'db_monitor:snapshot-section' snapshot.id 'indexes' %}">Indexes</a>
+        <a href="{% url 'db_monitor:snapshot-section' snapshot.id 'activity' %}">Activity</a>
+        <a href="{% url 'db_monitor:snapshot-section' snapshot.id 'findings' %}">Findings</a>
+    </div>
+
+    <div class="split-grid">
+        <section class="panel">
+            <div class="panel-header"><h2>Counts and totals</h2></div>
+            <div class="panel-body">
+                <div class="key-value">
+                    <div><span class="label">Total calls</span><strong>{{ summary.metrics.total_calls }}</strong></div>
+                    <div><span class="label">Total exec time</span><strong>{{ summary.metrics.total_exec_time|floatformat:2 }} ms</strong></div>
+                    <div><span class="label">Total seq scans</span><strong>{{ summary.metrics.total_seq_scans }}</strong></div>
+                    <div><span class="label">Total idx scans</span><strong>{{ summary.metrics.total_idx_scans }}</strong></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-header"><h2>Severity distribution</h2></div>
+            <div class="panel-body">
+                <ul class="summary-list">
+                    {% for item in summary.severity_counts %}
+                    <li><span class="severity-pill severity-{{ item.severity }}">{{ item.severity }}</span> <strong>{{ item.count }}</strong></li>
+                    {% empty %}
+                    <li>No findings have been created for this snapshot.</li>
+                    {% endfor %}
+                </ul>
+                <ul class="bar-chart" style="margin-top: 16px;">
+                    {% for row in summary.charts.finding_severity %}
+                    <li>
+                        <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.value }}</span></div>
+                        <div class="bar-track"><div class="bar-fill" style="width: {{ row.percent }}%;"></div></div>
+                        <div class="chart-meta">{{ row.meta }}</div>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </section>
+    </div>
+
+    <div class="split-grid" style="margin-top: 18px;">
+        <section class="panel">
+            <div class="panel-header"><h3>Slow query ranking</h3></div>
+            <div class="panel-body">
+                <ul class="summary-list">{% for query in queries.slowest %}<li><strong>{{ query.label }}</strong><br><span class="muted">Mean {{ query.mean_exec_time|floatformat:2 }} ms | Total {{ query.total_exec_time|floatformat:2 }} ms</span></li>{% empty %}<li>No query stats available.</li>{% endfor %}</ul>
+                <ul class="bar-chart" style="margin-top: 16px;">
+                    {% for row in summary.charts.slow_queries %}
+                    <li>
+                        <div class="chart-label"><span>{{ row.label }}</span><span>{{ row.value|floatformat:2 }} ms</span></div>
+                        <div class="bar-track"><div class="bar-fill" style="width: {{ row.percent }}%;"></div></div>
+                        <div class="chart-meta">{{ row.meta }}</div>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-header"><h3>Problematic tables</h3></div>
+            <div class="panel-body"><ul class="summary-list">{% for table in tables.problematic %}<li><strong>{{ table.table }}</strong><br><span class="muted">Seq scans {{ table.seq_scan }} | Seq/idx ratio {{ table.seq_to_idx_ratio|floatformat:2 }}</span></li>{% empty %}<li>No table stats available.</li>{% endfor %}</ul></div>
+        </section>
+    </div>
+
+    {% if query_plans.all %}
+    <section class="panel" style="margin-top: 18px;">
+        <div class="panel-header"><h3>Representative EXPLAIN plans</h3></div>
+        <div class="panel-body">
+            <table class="main-table">
+                <thead><tr><th>Name</th><th>Execution ms</th><th>Planning ms</th><th>Total cost</th><th>Index-only</th><th>Seq scan</th></tr></thead>
+                <tbody>
+                    {% for plan in query_plans.all %}
+                    <tr><td><strong>{{ plan.name }}</strong><br><span class="muted">{{ plan.description }}</span></td><td>{{ plan.execution_time_ms|floatformat:2 }}</td><td>{{ plan.planning_time_ms|floatformat:2 }}</td><td>{{ plan.total_cost|floatformat:2 }}</td><td>{{ plan.uses_index_only_scan }}</td><td>{{ plan.uses_seq_scan }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% endif %}
+</div>
+{% endblock %}
