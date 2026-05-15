@@ -89,6 +89,7 @@ def get_product_detail(slug):
         "reviews": [
             {
                 "user": review.user.username,
+                "user_id": review.user.id,
                 "rating": review.rating,
                 "content": review.content,
                 "created_at": review.created_at.isoformat(),
