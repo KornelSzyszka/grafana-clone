@@ -710,6 +710,10 @@ class IndexBenchmarkCsvTests(TestCase):
         with self.assertRaisesMessage(Exception, "requires PostgreSQL"):
             call_command("run_index_benchmark", "--profile=medium", "--runs=1", "--iterations=1")
 
+    def test_set_benchmark_index_mode_requires_postgresql(self):
+        with self.assertRaisesMessage(Exception, "require PostgreSQL"):
+            call_command("set_benchmark_index_mode", "regular")
+
     def test_query_coverage_preset_is_shorter_than_full_matrix(self):
         self.assertLess(len(TRAFFIC_PRESETS["query_coverage"]), len(TRAFFIC_PRESETS["full"]))
         self.assertEqual(len(TRAFFIC_PRESETS["query_coverage"]), 8)
