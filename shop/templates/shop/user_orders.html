@@ -1,0 +1,132 @@
+{% extends "shop/base.html" %}
+
+{% block title %}User: {{ user.username }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .user-info-card {
+        margin-bottom: 30px;
+        padding: 20px;
+        border-left: 4px solid #3498db;
+    }
+
+    /* Sekcja zamówień */
+    .order-item {
+        background: #fff;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        margin-bottom: 20px;
+        overflow: hidden;
+    }
+
+    .order-header {
+        background: #f8f9fa;
+        padding: 15px 20px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    /* Statusy zamówień */
+    .status-badge {
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+    .status-completed { background: #e3fcef; color: #01896e; }
+    .status-pending { background: #fff5f5; color: #ff7675; }
+
+    /* Tabela produktów wewnątrz zamówienia */
+    .order-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .order-table th {
+        text-align: left;
+        font-size: 11px;
+        color: var(--text-light);
+        text-transform: uppercase;
+        padding: 10px 20px;
+        background: #fafafa;
+    }
+    .order-table td {
+        padding: 12px 20px;
+        border-top: 1px solid #eee;
+        font-size: 14px;
+    }
+
+    .total-row {
+        background: #fff;
+        padding: 15px 20px;
+        text-align: right;
+        font-weight: 700;
+        border-top: 1px solid var(--border-color);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <div class="page-header">
+        <a href="/api/users/" style="text-decoration: none; color: var(--text-light); font-size: 14px;">← Back to users</a>
+        <h1 style="margin-top: 10px;">Users Orders</h1>
+    </div>
+
+    <!-- Informacje o użytkowniku -->
+    <div class="content-card user-info-card">
+        <div style="font-size: 13px; color: var(--text-light);">ID: #{{ user.id }}</div>
+        <h2 style="margin: 5px 0;">{{ user.username }}</h2>
+        <div style="color: var(--text-dark);">{{ user.email }}</div>
+    </div>
+
+    <h3 style="margin-bottom: 20px;">Orders ({{ orders|length }})</h3>
+
+    {% for order in orders %}
+    <div class="order-item">
+        <div class="order-header">
+            <div>
+                <strong>Order #{{ order.id }}</strong>
+                <span style="color: var(--text-light); margin-left: 10px; font-size: 13px;">{{ order.created_at|slice:":10" }}</span>
+            </div>
+            <span class="status-badge {% if order.status == 'completed' %}status-ok{% else %}status-pending{% endif %}">
+                {{ order.status }}
+            </span>
+        </div>
+
+        <table class="order-table">
+            <thead>
+                <tr>
+                    <th>Product</th>
+                    <th style="text-align: center; width: 100px;">Quantity</th> <!-- Dodano szerokość i centrowanie -->
+                    <th style="text-align: right;">Line Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in order.items %}
+                <tr>
+                    <td>
+                        <a href="/api/products/{{ item.product_slug }}/" style="color: var(--text-dark); font-weight: 600; text-decoration: none;">
+                            {{ item.product_name }}
+                        </a>
+                    </td>
+                    <td style="text-align: center; font-weight: 500;">x{{ item.quantity }}</td> <!-- Stałe centrowanie -->
+                    <td style="text-align: right; font-family: monospace;">{{ item.line_total }} PLN</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div class="total-row">
+            Total: <span style="font-size: 18px; color: var(--text-dark);">{{ order.total_amount }} PLN</span>
+        </div>
+    </div>
+    {% empty %}
+    <div class="content-card" style="text-align: center; padding: 40px; color: var(--text-light);">
+        This user has no orders yet.
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

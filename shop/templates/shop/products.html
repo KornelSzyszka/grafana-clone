@@ -23,11 +23,66 @@
     .stock-badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
     .stock-ok { background: #e3fcef; color: #01896e; }
     .stock-low { background: #fff5f5; color: #ff7675; }
-    .pop-container { display: flex; align-items: center; gap: 12px; min-width: 120px; }
-    .pop-bar-bg { flex-grow: 1; height: 8px; background: #eee; border-radius: 4px; overflow: hidden; }
-    .pop-bar-fill { height: 100%; background: #fdcb6e; border-radius: 4px; }
-    .pop-value { font-size: 12px; font-weight: 700; color: var(--text-light); min-width: 30px; }
-    .category-tag { font-size: 11px; background: var(--border-color); padding: 2px 8px; border-radius: 4px; color: var(--text-light); }
+
+    /* Pasek popularności - UNIKALNE DLA PRODUKTÓW */
+    .pop-container {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 120px;
+    }
+
+    .pop-bar-bg {
+        flex-grow: 1;
+        height: 8px;
+        background: #eee;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    .pop-bar-fill {
+        height: 100%;
+        background: #fdcb6e; /* Złoty kolor popularności */
+        border-radius: 4px;
+    }
+
+    .pop-value {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--text-light);
+        min-width: 30px;
+    }
+
+    .category-tag {
+        font-size: 11px;
+        background: var(--border-color);
+        padding: 2px 8px;
+        border-radius: 4px;
+        color: var(--text-light);
+    }
+
+    .nav-container {
+        display: flex;
+        justify-content: center;
+        gap: 20px;
+        padding: 20px;
+    }
+    .btn-nav {
+        display: inline-flex;
+        align-items: center;
+        padding: 10px 20px;
+        background: #fff;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        color: var(--text-dark);
+        text-decoration: none;
+        font-weight: 600;
+        transition: 0.2s;
+    }
+    .btn-nav:hover {
+        background: #f5f5f5;
+        transform: translateY(-1px);
+    }
 </style>
 {% endblock %}
 
@@ -103,6 +158,13 @@
                     {% endfor %}
                 </tbody>
             </table>
+        </div>
+
+        <div class="nav-container">
+            {% if page > 1 %}
+                <a href="?page={{ page|add:"-1" }}" class="btn-nav">⬅ Poprzednia</a>
+            {% endif %}
+            <a href="?page={{ page|add:"1" }}" class="btn-nav">Następna ➡</a>
         </div>
     </div>
 </div>

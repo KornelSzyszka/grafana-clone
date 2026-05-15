@@ -1,0 +1,131 @@
+{% extends "shop/base.html" %}
+
+{% block title %}{{ product.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Układ strony */
+    .product-grid {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 30px;
+        margin-top: 20px;
+    }
+
+    /* Detale produktu */
+    .product-main {
+        padding: 30px;
+    }
+    .price-large {
+        font-size: 32px;
+        font-weight: 800;
+        color: var(--text-dark);
+        margin: 15px 0;
+    }
+    .description {
+        line-height: 1.6;
+        color: #4a4a4a;
+        margin: 20px 0;
+    }
+
+    /* Opinie */
+    .reviews-section {
+        margin-top: 40px;
+        border-top: 1px solid var(--border-color);
+        padding-top: 20px;
+    }
+    .review-card {
+        padding: 15px;
+        border-bottom: 1px solid #f0f0f0;
+    }
+    .review-user { font-weight: 700; font-size: 14px; }
+    .review-rating { color: #e8bd00; margin-bottom: 5px; }
+    .review-date { font-size: 11px; color: var(--text-light); }
+
+    /* Produkty podobne */
+    .similar-card {
+        margin-bottom: 15px;
+        padding: 15px;
+        background: #fdfdfd;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        transition: 0.2s;
+    }
+    .similar-card:hover { transform: translateY(-2px); border-color: #ccc; }
+    .similar-link { text-decoration: none; color: inherit; }
+
+    /* Znane Ci już style z listy */
+    .stock-badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    .stock-ok { background: #e3fcef; color: #01896e; }
+    .stock-low { background: #fff5f5; color: #ff7675; }
+    .category-tag { font-size: 12px; background: var(--border-color); padding: 4px 12px; border-radius: 4px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <div class="page-header">
+        <a href="/api/products/" style="text-decoration: none; color: var(--text-light); font-size: 14px;">← Back to products</a>
+        <h1 style="margin-top: 10px;">{{ product.name }}</h1>
+        <div>
+            <span class="category-tag">{{ product.category }}</span>
+            <span style="margin-left: 10px; color: #e8bd00; font-weight: 700;">★ {{ product.average_rating|floatformat:1 }}</span>
+        </div>
+    </div>
+
+    <div class="product-grid">
+        <!-- Lewa kolumna: Opis i Opinie -->
+        <div class="content-card product-main">
+            <div class="price-large">{{ product.price }} <small style="font-size: 18px;">PLN</small></div>
+            
+            {% if product.stock > 10 %}
+                <span class="stock-badge stock-ok">Available ({{ product.stock }})</span>
+            {% else %}
+                <span class="stock-badge stock-low">Low stock ({{ product.stock }})</span>
+            {% endif %}
+
+            <div class="description">
+                <h3>Description</h3>
+                <p>{{ product.description }}</p>
+            </div>
+
+            <div class="reviews-section">
+                <h3>Reviews ({{ reviews|length }})</h3>
+                {% for review in reviews %}
+                    <div class="review-card">
+                        <div class="review-user">
+                            <a href="/api/users/{{ review.user_id }}/orders/" style="text-decoration: none; color: #3498db;">
+                                @{{ review.user }}
+                            </a>
+                        </div>
+                        <div class="review-rating">
+                            {% for i in "12345" %}
+                                {% if forloop.counter <= review.rating %}★{% else %}☆{% endif %}
+                            {% endfor %}
+                        </div>
+                        <p style="margin: 5px 0;">{{ review.content }}</p>
+                        <div class="review-date">{{ review.created_at|slice:":10" }}</div>
+                    </div>
+                {% empty %}
+                    <p style="color: var(--text-light);">No reviews yet.</p>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Prawa kolumna: Podobne produkty -->
+        <div class="side-column">
+            <h3 style="margin-bottom: 15px;">Similar Products</h3>
+            {% for similar in similar_products %}
+                <a href="/api/products/{{ similar.slug }}/" class="similar-link">
+                    <div class="similar-card">
+                        <div style="font-weight: 600;">{{ similar.name }}</div>
+                        <div style="color: var(--text-dark); font-size: 14px; margin-top: 5px;">{{ similar.price }} PLN</div>
+                    </div>
+                </a>
+            {% empty %}
+                <p style="color: var(--text-light);">No similar products found.</p>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}
