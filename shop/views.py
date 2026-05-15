@@ -64,7 +64,11 @@ def product_detail_view(_request, slug):
     payload = get_product_detail(slug)
     if not payload:
         raise Http404("Product not found")
+    
+    return render(_request, "shop/product.html", payload)
+    '''
     return JsonResponse(payload)
+    '''
 
 
 @require_GET
@@ -72,7 +76,11 @@ def order_history_view(_request, user_id):
     payload = get_order_history(user_id=user_id)
     if not payload:
         raise Http404("User or orders not found")
+    
+    return render(_request, "shop/user_orders.html", payload)
+    '''
     return JsonResponse(payload)
+    '''
 
 
 @require_GET
