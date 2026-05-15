@@ -9,6 +9,7 @@ from db_monitor.services.index_experiments import recommend_experiment_indexes
 from db_monitor.services.reporting import get_comparison_report, get_dashboard_overview, get_snapshot_report
 from db_monitor.models import AnalysisFinding, IndexStatSnapshot, QueryStatSnapshot, StatsSnapshot, TableStatSnapshot
 from db_monitor.models import ExperimentIndexDefinition, ExperimentIndexGroup
+from db_monitor.services.benchmark_indexes import TRAFFIC_PRESETS, _effective_concurrency, _operation_rows
 from db_monitor.services.query_classification import classify_sql_operation
 from load_simulator.models import WorkloadRun
 
@@ -665,6 +666,60 @@ class QueryClassificationTests(TestCase):
         self.assertEqual(classify_sql_operation("BEGIN"), "OTHER")
 
 
+class IndexBenchmarkCsvTests(TestCase):
+    def test_operation_rows_aggregate_query_types_for_csv(self):
+        snapshot = StatsSnapshot.objects.create(
+            label="csv",
+            environment="test",
+            database_vendor="postgresql",
+            database_name="grafana_clone",
+            status=StatsSnapshot.Status.COMPLETED,
+        )
+        QueryStatSnapshot.objects.bulk_create(
+            [
+                QueryStatSnapshot(
+                    snapshot=snapshot,
+                    operation_type="SELECT",
+                    query_text_normalized="SELECT * FROM shop_product",
+                    calls=10,
+                    total_exec_time=50,
+                    mean_exec_time=5,
+                    max_exec_time=8,
+                    rows=100,
+                ),
+                QueryStatSnapshot(
+                    snapshot=snapshot,
+                    operation_type="UPDATE",
+                    query_text_normalized="UPDATE shop_product SET stock = stock + 1",
+                    calls=4,
+                    total_exec_time=20,
+                    mean_exec_time=5,
+                    max_exec_time=7,
+                    rows=4,
+                ),
+            ]
+        )
+
+        rows = _operation_rows(snapshot, {"profile": "medium", "index_mode": "none"})
+        by_type = {row["query_type"]: row for row in rows}
+
+        self.assertEqual(by_type["SELECT"]["total_exec_time_ms"], 50)
+        self.assertEqual(by_type["UPDATE"]["calls"], 4)
+
+    def test_run_index_benchmark_requires_postgresql(self):
+        with self.assertRaisesMessage(Exception, "requires PostgreSQL"):
+            call_command("run_index_benchmark", "--profile=medium", "--runs=1", "--iterations=1")
+
+    def test_query_coverage_preset_is_shorter_than_full_matrix(self):
+        self.assertLess(len(TRAFFIC_PRESETS["query_coverage"]), len(TRAFFIC_PRESETS["full"]))
+        self.assertEqual(len(TRAFFIC_PRESETS["query_coverage"]), 8)
+
+    def test_huge_reporting_benchmark_caps_concurrency(self):
+        self.assertEqual(_effective_concurrency("huge", "sales_report_heavy", 4), 1)
+        self.assertEqual(_effective_concurrency("huge", "reporting", 4), 1)
+        self.assertEqual(_effective_concurrency("large", "sales_report_heavy", 4), 4)
+
+
 class IndexExperimentSelectionTests(TestCase):
     def test_recommend_experiment_indexes_selects_multiple_candidates_from_slowest_queries(self):
         snapshot = StatsSnapshot.objects.create(
@@ -775,3 +830,5 @@ class IndexExperimentSelectionTests(TestCase):
 
         self.assertTrue(ExperimentIndexGroup.objects.filter(name="catalog_covering").exists())
         self.assertTrue(ExperimentIndexDefinition.objects.filter(name="shop_product_covering_catalog_idx").exists())
+        self.assertTrue(ExperimentIndexDefinition.objects.filter(name="shop_product_slug_detail_covering_idx").exists())
+        self.assertTrue(ExperimentIndexDefinition.objects.filter(name="load_cart_cleanup_covering_idx").exists())

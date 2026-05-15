@@ -4,12 +4,22 @@ from db_monitor.models import ExperimentIndexDefinition, ExperimentIndexGroup, S
 from django.db import connection
 
 
-EXPERIMENT_GROUPS = ["catalog_covering", "order_history_covering", "search", "sales_report", "write_cost"]
+EXPERIMENT_GROUPS = [
+    "catalog_covering",
+    "product_detail_covering",
+    "order_history_covering",
+    "search",
+    "sales_report",
+    "cleanup_covering",
+    "write_cost",
+]
 EXPERIMENT_GROUP_DESCRIPTIONS = {
     "catalog_covering": "Covering indexes for product catalog listing flows.",
+    "product_detail_covering": "Covering indexes for product detail, similar products, and review flows.",
     "order_history_covering": "Covering indexes for user order history flows.",
     "search": "Indexes for text-heavy catalog search flows.",
     "sales_report": "Indexes for reporting and aggregate windows.",
+    "cleanup_covering": "Covering indexes for bounded cleanup and DELETE-heavy flows.",
     "write_cost": "Indexes included when measuring write-side maintenance overhead.",
 }
 
@@ -31,6 +41,33 @@ INDEX_CANDIDATE_RULES = [
         "include": "id, slug, stock, popularity_score",
         "description": "Covering index for active product catalog filtering by category and price sorting",
         "match_all": ["shop_product", "is_active", "price"],
+    },
+    {
+        "name": "shop_product_popularity_covering_idx",
+        "groups": ["catalog_covering", "write_cost"],
+        "table": "shop_product",
+        "columns": "is_active, category_id, popularity_score DESC, name",
+        "include": "id, slug, price, stock, created_at",
+        "description": "Covering index for active product catalog sorting by popularity",
+        "match_all": ["shop_product", "is_active", "popularity_score"],
+    },
+    {
+        "name": "shop_product_slug_detail_covering_idx",
+        "groups": ["product_detail_covering", "write_cost"],
+        "table": "shop_product",
+        "columns": "slug, is_active",
+        "include": "id, name, description, price, stock, category_id, popularity_score, created_at",
+        "description": "Covering index for product detail lookup by slug",
+        "match_all": ["shop_product", "slug", "is_active"],
+    },
+    {
+        "name": "shop_product_similar_covering_idx",
+        "groups": ["product_detail_covering", "catalog_covering", "write_cost"],
+        "table": "shop_product",
+        "columns": "category_id, is_active, popularity_score DESC, name",
+        "include": "id, slug, price, stock",
+        "description": "Covering index for similar products lookup by category",
+        "match_all": ["shop_product", "category_id", "is_active", "popularity_score"],
     },
     {
         "name": "shop_product_name_trgm_idx",
@@ -62,25 +99,83 @@ INDEX_CANDIDATE_RULES = [
         "match_all": ["shop_order", "user_id", "created_at"],
     },
     {
-        "name": "shop_order_status_created_at_idx",
+        "name": "shop_orderitem_order_covering_idx",
+        "groups": ["order_history_covering", "sales_report", "write_cost"],
+        "table": "shop_orderitem",
+        "columns": "order_id",
+        "include": "product_id, quantity, unit_price, line_total",
+        "description": "Covering index for order history item lookup and order-based report joins",
+        "match_all": ["shop_orderitem", "order_id"],
+    },
+    {
+        "name": "shop_order_status_created_at_covering_idx",
         "groups": ["sales_report", "write_cost"],
         "table": "shop_order",
         "columns": "status, created_at DESC",
-        "description": "Sales report filtering by order status and date window",
+        "include": "id, user_id, total_amount",
+        "description": "Covering index for sales report filtering by order status and date window",
         "match_all": ["shop_order", "status", "created_at"],
     },
     {
-        "name": "shop_review_product_created_at_idx",
-        "groups": ["catalog_covering", "write_cost"],
+        "name": "shop_orderitem_product_report_covering_idx",
+        "groups": ["sales_report", "write_cost"],
+        "table": "shop_orderitem",
+        "columns": "product_id",
+        "include": "order_id, line_total, quantity",
+        "description": "Covering index for sales report joins from products to order items",
+        "match_all": ["shop_orderitem", "product_id", "line_total"],
+    },
+    {
+        "name": "shop_product_id_category_covering_idx",
+        "groups": ["sales_report", "write_cost"],
+        "table": "shop_product",
+        "columns": "id",
+        "include": "category_id",
+        "description": "Covering index for sales report product-to-category lookup",
+        "match_all": ["shop_product", "category_id"],
+    },
+    {
+        "name": "shop_review_product_created_at_covering_idx",
+        "groups": ["product_detail_covering", "catalog_covering", "write_cost"],
         "table": "shop_review",
         "columns": "product_id, created_at DESC",
-        "description": "Recent product review lookup ordered by newest reviews",
+        "include": "id, user_id, rating, content",
+        "description": "Covering index for recent product review lookup ordered by newest reviews",
         "match_all": ["shop_review", "product_id", "created_at"],
+    },
+    {
+        "name": "shop_review_created_at_cleanup_covering_idx",
+        "groups": ["cleanup_covering", "write_cost"],
+        "table": "shop_review",
+        "columns": "created_at",
+        "include": "id, product_id, user_id",
+        "description": "Covering index for bounded old-review cleanup queries",
+        "match_all": ["shop_review", "created_at"],
+    },
+    {
+        "name": "load_cart_cleanup_covering_idx",
+        "groups": ["cleanup_covering", "write_cost"],
+        "table": "load_simulator_democart",
+        "columns": "expires_at, status",
+        "include": "id, user_id",
+        "description": "Covering index for expired demo-cart cleanup queries",
+        "match_all": ["load_simulator_democart", "expires_at"],
+    },
+    {
+        "name": "load_cart_item_cart_covering_idx",
+        "groups": ["cleanup_covering", "write_cost"],
+        "table": "load_simulator_democartitem",
+        "columns": "cart_id",
+        "include": "product_id, quantity, unit_price",
+        "description": "Covering index for cart item lookup before cart cleanup",
+        "match_all": ["load_simulator_democartitem", "cart_id"],
     },
 ]
 
 DEFAULT_INDEX_NAMES = {
     "shop_product_covering_catalog_idx",
+    "shop_product_slug_detail_covering_idx",
+    "shop_order_user_created_at_covering_idx",
     "shop_product_name_trgm_idx",
 }
 
@@ -302,7 +397,7 @@ def get_experiment_index_state(snapshot=None, limit=5, groups=None):
     }
 
 
-def configure_experiment_indexes(mode, snapshot=None, limit=5, concurrently=False, groups=None):
+def configure_experiment_indexes(mode, snapshot=None, limit=5, concurrently=False, groups=None, apply_all=False):
     if mode not in {"with_indexes", "without_indexes"}:
         raise ValueError("Mode must be either `with_indexes` or `without_indexes`.")
 
@@ -311,7 +406,10 @@ def configure_experiment_indexes(mode, snapshot=None, limit=5, concurrently=Fals
 
     notes = []
     changed = []
-    selected_definitions = recommend_experiment_indexes(snapshot=snapshot, limit=limit, groups=groups)
+    if apply_all:
+        selected_definitions = _filter_by_groups(_catalog_rules(), groups=groups)
+    else:
+        selected_definitions = recommend_experiment_indexes(snapshot=snapshot, limit=limit, groups=groups)
     selected_names = {definition["name"] for definition in selected_definitions}
     all_definitions = _managed_index_definitions(snapshot=snapshot, limit=limit, groups=groups)
 
@@ -360,4 +458,5 @@ def configure_experiment_indexes(mode, snapshot=None, limit=5, concurrently=Fals
         "selection_strategy": "top longest-running queries from before snapshot",
         "selected_indexes": [item for item in state if item["name"] in selected_names],
         "concurrently": concurrently,
+        "apply_all": apply_all,
     }

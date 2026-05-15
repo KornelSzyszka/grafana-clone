@@ -21,6 +21,7 @@ class Command(BaseCommand):
             action="store_true",
             help="Use CREATE/DROP INDEX CONCURRENTLY. Django must not wrap this command in a transaction.",
         )
+        parser.add_argument("--all-indexes", action="store_true")
 
     def handle(self, *args, **options):
         if options["apply"]:
@@ -37,6 +38,7 @@ class Command(BaseCommand):
             "limit": options["limit"],
             "group": options["group"],
             "concurrently": options["concurrently"],
+            "all_indexes": options["all_indexes"],
             "stdout": self.stdout,
         }
         call_command("configure_index_experiment", *command_args, **command_options)

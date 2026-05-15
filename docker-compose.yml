@@ -3,6 +3,7 @@ services:
     image: postgres:17
     container_name: grafana-clone-postgres
     restart: unless-stopped
+    shm_size: "1gb"
     environment:
       POSTGRES_DB: grafana_clone
       POSTGRES_USER: postgres

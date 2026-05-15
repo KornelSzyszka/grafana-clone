@@ -3,10 +3,12 @@ from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.db import connection
+from django.db.models import Count, F, Sum
 from django.utils import timezone
 
 from db_monitor.models import QueryPlanSnapshot, StatsSnapshot
-from shop.models import Order, Product
+from load_simulator.models import DemoCart, DemoCartItem
+from shop.models import Order, OrderItem, Product, Review
 
 
 def _walk_plan_nodes(node):
@@ -62,6 +64,42 @@ def _representative_queries():
         "Catalog listing filtered by active/category/recent and sorted by price.",
         product_base.order_by("price", "name").values("id", "name", "slug", "price", "stock", "popularity_score")[:50],
     )
+    yield (
+        "catalog_popularity_covering",
+        "Catalog listing filtered by active/category and sorted by popularity.",
+        product_base.order_by("-popularity_score", "name").values("id", "name", "slug", "price", "stock", "created_at")[:50],
+    )
+
+    product = Product.objects.filter(is_active=True).order_by("-popularity_score", "id").first()
+    if product:
+        yield (
+            "product_detail_slug_covering",
+            "Product detail lookup by slug.",
+            Product.objects.filter(slug=product.slug, is_active=True).values(
+                "id",
+                "name",
+                "description",
+                "price",
+                "stock",
+                "category_id",
+                "popularity_score",
+            )[:1],
+        )
+        yield (
+            "similar_products_covering",
+            "Similar products lookup by category and popularity.",
+            Product.objects.filter(category_id=product.category_id, is_active=True)
+            .exclude(id=product.id)
+            .order_by("-popularity_score", "name")
+            .values("id", "slug", "price", "stock")[:4],
+        )
+        yield (
+            "product_reviews_covering",
+            "Recent reviews for product detail.",
+            Review.objects.filter(product_id=product.id)
+            .order_by("-created_at")
+            .values("id", "user_id", "rating", "content", "created_at")[:5],
+        )
 
     user_id = get_user_model().objects.filter(username__startswith="demo_user_").values_list("id", flat=True).first()
     if user_id:
@@ -71,6 +109,45 @@ def _representative_queries():
             Order.objects.filter(user_id=user_id)
             .order_by("-created_at")
             .values("id", "status", "total_amount", "created_at")[:25],
+        )
+
+    order_id = Order.objects.order_by("-created_at").values_list("id", flat=True).first()
+    if order_id:
+        yield (
+            "order_items_covering",
+            "Order items lookup by order for order history rendering.",
+            OrderItem.objects.filter(order_id=order_id).values("product_id", "quantity", "unit_price", "line_total")[:25],
+        )
+
+    report_since = timezone.now() - timedelta(days=90)
+    yield (
+        "sales_report_covering",
+        "Sales report aggregate by product category.",
+        Order.objects.filter(
+            created_at__gte=report_since,
+            status__in=[Order.Status.PAID, Order.Status.SHIPPED, Order.Status.DELIVERED],
+        )
+        .values(category_name=F("items__product__category__name"))
+        .annotate(order_count=Count("id", distinct=True), revenue=Sum("items__line_total"))
+        .order_by("-revenue", "category_name"),
+    )
+
+    yield (
+        "old_review_cleanup_covering",
+        "Bounded old-review cleanup candidate scan.",
+        Review.objects.filter(created_at__lt=timezone.now() - timedelta(days=365)).order_by("created_at", "id").values("id")[:20],
+    )
+    yield (
+        "cart_cleanup_covering",
+        "Bounded expired demo-cart cleanup candidate scan.",
+        DemoCart.objects.filter(expires_at__lt=timezone.now() - timedelta(days=7)).order_by("expires_at", "id").values("id")[:20],
+    )
+    cart_id = DemoCart.objects.order_by("id").values_list("id", flat=True).first()
+    if cart_id:
+        yield (
+            "cart_items_covering",
+            "Cart item lookup by cart before cleanup.",
+            DemoCartItem.objects.filter(cart_id=cart_id).values("product_id", "quantity", "unit_price")[:20],
         )
 
 
